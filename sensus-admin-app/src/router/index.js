@@ -9,6 +9,7 @@ import UsersView from '@/views/UsersView.vue'
 import AnalyticsView from '@/views/AnalyticsView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import LoginView from '@/views/LoginView.vue'
+import RegisterView from '@/views/RegisterView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -16,6 +17,11 @@ const router = createRouter({
     {
       path: '/login',
       component: LoginView,
+    },
+
+    {
+      path: '/register',
+      component: RegisterView,
     },
 
     {
