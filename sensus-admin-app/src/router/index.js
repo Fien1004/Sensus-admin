@@ -20,6 +20,8 @@ const router = createRouter({
     {
       path: '/',
       component: AdminLayout,
+      // the admin layout and its children require authentication
+      meta: { requiresAuth: true },
 
       children: [
         {
@@ -45,6 +47,25 @@ const router = createRouter({
       ],
     },
   ],
+})
+
+// Global auth guard (placeholder)
+// TODO: Replace the placeholder check with a real Supabase auth check when ready.
+router.beforeEach((to, from, next) => {
+  // Determine if the target route (or any parent) requires auth
+  const requiresAuth = to.matched.some((record) => record.meta && record.meta.requiresAuth)
+
+  // Temporary placeholder - always `true` for now. Swap this out for real auth state.
+  const isAuthenticated = true
+
+  if (requiresAuth && !isAuthenticated) {
+    // Not authenticated — redirect to login. Keep attempted path in query for later.
+    next({ path: '/login', query: { redirect: to.fullPath } })
+    return
+  }
+
+  // Otherwise allow navigation
+  next()
 })
 
 export default router
