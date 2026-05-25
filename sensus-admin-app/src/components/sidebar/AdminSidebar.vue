@@ -109,12 +109,12 @@ const icons = {
   background: rgba(0,0,0,0.03);
 }
 
-.router-link-active {
+.router-link-exact-active {
   background: var(--color-primary-600) !important;
   color: #ffffff !important;
 }
 
-.router-link-active .icon {
+.router-link-exact-active .icon {
   filter: brightness(0) invert(1);
 }
 
