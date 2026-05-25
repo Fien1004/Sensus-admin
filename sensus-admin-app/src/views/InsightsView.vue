@@ -22,23 +22,23 @@
     <section class="kpi-row">
       <div class="kpi-card big">
         <div class="kpi-label">Sessies</div>
-        <div class="kpi-value">689</div>
+        <div class="kpi-value">{{ kpi.totalSessions }}</div>
       </div>
 
       <div class="kpi-card big">
         <div class="kpi-label">Voltooid</div>
-        <div class="kpi-value">70%</div>
+        <div class="kpi-value">{{ kpi.completedPct }}%</div>
       </div>
 
       <div class="kpi-card big">
         <div class="kpi-label">Afhaak %</div>
-        <div class="kpi-value">32%</div>
-        <div class="kpi-meta success">↑ 32% t.o.v. vorige week</div>
+        <div class="kpi-value">{{ kpi.dropoffPct }}%</div>
+        <div class="kpi-meta success">{{ dropoffMeta }}</div>
       </div>
 
       <div class="kpi-card big">
         <div class="kpi-label">Gem. sessieduur</div>
-        <div class="kpi-value">11 min</div>
+        <div class="kpi-value">{{ kpi.avgDurationLabel }}</div>
       </div>
     </section>
 
@@ -46,10 +46,14 @@
       <div class="selector-card">
         <label class="select-field">
           <span class="sr-only">Scenario</span>
-          <select class="select-input">
-            <option>Scenario: Online gesprek loopt vast</option>
+          <select class="select-input" v-model="selectedScenarioKey" :disabled="loadingScenarios">
+            <option v-for="scenario in scenarios" :key="scenario.key" :value="scenario.key">
+              Scenario: {{ scenario.title }}
+            </option>
           </select>
         </label>
+        <div v-if="loadingScenarios || loadingScenarioData" class="small-label">Data laden...</div>
+        <div v-else-if="errorMessage" class="small-label">{{ errorMessage }}</div>
       </div>
     </div>
 
@@ -60,15 +64,15 @@
         <div class="insights-grid">
           <div class="small-card">
             <div class="small-label">Voltooid %</div>
-            <div class="small-value">95.7%</div>
+            <div class="small-value">{{ kpi.completedPct }}%</div>
           </div>
 
           <div class="small-card">
             <div class="small-label">Afhaak %</div>
-            <div class="small-value">-50%</div>
+            <div class="small-value">{{ kpi.dropoffPct }}%</div>
           </div>
 
-          <div class="warning-box">Afhaak ligt 18% hoger dan gemiddeld</div>
+          <div class="warning-box">{{ warningText }}</div>
         </div>
       </div>
 
@@ -78,18 +82,18 @@
         <div class="behavior-grid-vertical">
           <div class="small-card">
             <div class="behavior-title">Populairste pad</div>
-            <div class="behavior-value">B</div>
-            <div class="behavior-meta">65% koos dit pad</div>
+            <div class="behavior-value">{{ behaviorSummary.mostPopularPath }}</div>
+            <div class="behavior-meta">{{ behaviorSummary.mostPopularPct }}% koos dit pad</div>
           </div>
 
           <div class="small-card">
             <div class="behavior-title">Minst populairste pad</div>
-            <div class="behavior-value">A</div>
-            <div class="behavior-meta">35% koos dit pad</div>
+            <div class="behavior-value">{{ behaviorSummary.leastPopularPath }}</div>
+            <div class="behavior-meta">{{ behaviorSummary.leastPopularPct }}% koos dit pad</div>
           </div>
         </div>
 
-        <div class="behavior-note">65% kiest pad B, vaak om confrontatie te vermijden</div>
+        <div class="behavior-note">{{ behaviorSummary.note }}</div>
       </aside>
     </div>
 
@@ -107,13 +111,23 @@
               <th>Reflectie</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody v-if="loadingScenarioData">
+            <tr>
+              <td colspan="5" class="reflection-text">Reflecties laden...</td>
+            </tr>
+          </tbody>
+          <tbody v-else-if="reflections.length">
             <tr v-for="r in reflections" :key="r.id" class="reflection-row">
               <td>{{ r.id }}</td>
               <td>{{ r.date }}</td>
               <td>{{ r.age }}</td>
               <td>{{ r.gender }}</td>
               <td class="reflection-text">{{ r.text }}</td>
+            </tr>
+          </tbody>
+          <tbody v-else>
+            <tr>
+              <td colspan="5" class="reflection-text">Geen reflecties beschikbaar.</td>
             </tr>
           </tbody>
         </table>
@@ -190,33 +204,567 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { supabase } from '@/services/supabase'
 
 const tabs = [
   { key: 'all', label: 'Alle sessies' },
   { key: 'week', label: 'Deze week' },
   { key: 'today', label: 'Vandaag' },
 ]
+
 const activeTab = ref('all')
+const loadingScenarios = ref(true)
+const loadingScenarioData = ref(false)
+const errorMessage = ref('')
+const scenarios = ref([])
+const selectedScenarioKey = ref('')
+const sessions = ref([])
+const reflections = ref([])
+const analyticsRows = ref([])
 
-const reflections = ref([
-  { id: 'r85n5Te8gG', date: '17 dec 2025', age: 17, gender: 'V', text: 'Ik vindt het soms lastig om signalen van een ander te herkennen.' },
-  { id: 'Ye8Psf592Ne', date: '17 dec 2025', age: 17, gender: 'M', text: 'Ik ben heel open, en merk dat mensen daardoor soms foute aannemen hebben. Ik weet niet altijd hoe ik daarop moet reageren.' },
-  { id: 'je8e4b9He4F', date: '18 dec 2025', age: 15, gender: 'V', text: 'Als meisje is het makkelijker om met iemand te sturen. De meeste jongens vinden alles wel oké.' },
-])
+onMounted(() => {
+  void loadScenarios()
+})
 
-const genders = ref([
-  { key: 'men', label: 'Mannen', padA: 64, padB: 36, drop: 15 },
-  { key: 'women', label: 'Vrouwen', padA: 30, padB: 70, drop: 15 },
-  { key: 'nonbinary', label: 'Non-binair', padA: 40, padB: 60, drop: 15 },
-  { key: 'prefer', label: 'Wil ik liever niet zeggen', padA: 50, padB: 50, drop: 15 },
-])
+watch(selectedScenarioKey, () => {
+  if (!selectedScenario.value) return
+  void loadScenarioData()
+})
 
-const steps = ref([
-  { key: 's1', title: 'Stap 1', desc: 'Introductie & context', padA: 45, padB: 55, drop: 10 },
-  { key: 's2', title: 'Stap 2', desc: 'Eerste interactie', padA: 38, padB: 62, drop: 18 },
-  { key: 's3', title: 'Stap 3', desc: 'Confrontatie & keuze', padA: 28, padB: 72, drop: 32 },
-])
+const selectedScenario = computed(() => {
+  return scenarios.value.find((scenario) => scenario.key === selectedScenarioKey.value) || null
+})
+
+const filteredSessions = computed(() => {
+  const all = [...sessions.value]
+
+  if (activeTab.value === 'week') {
+    return all.filter((session) => session.dateObj && isInCurrentWeek(session.dateObj))
+  }
+
+  if (activeTab.value === 'today') {
+    const today = new Date()
+    return all.filter((session) => session.dateObj && isSameDay(session.dateObj, today))
+  }
+
+  return all
+})
+
+const kpi = computed(() => {
+  const total = filteredSessions.value.length
+  const completed = filteredSessions.value.filter((session) => session.statusKey === 'completed').length
+  const dropped = filteredSessions.value.filter((session) => session.statusKey === 'stopped').length
+  const durationValues = filteredSessions.value
+    .map((session) => session.durationMinutes)
+    .filter((value) => typeof value === 'number' && value > 0)
+
+  const avgDuration = durationValues.length
+    ? Math.round(durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length)
+    : 0
+
+  return {
+    totalSessions: total,
+    completedPct: total ? Math.round((completed / total) * 100) : 0,
+    dropoffPct: total ? Math.round((dropped / total) * 100) : 0,
+    avgDuration,
+    avgDurationLabel: `${avgDuration} min`,
+  }
+})
+
+const dropoffMeta = computed(() => {
+  if (!filteredSessions.value.length) {
+    return 'Geen vergelijkingsdata'
+  }
+
+  return 'Op basis van live sessiedata'
+})
+
+const warningText = computed(() => {
+  if (!filteredSessions.value.length) {
+    return 'Geen sessiedata beschikbaar voor dit scenario'
+  }
+
+  if (kpi.value.dropoffPct >= 50) {
+    return `Afhaak ligt op ${kpi.value.dropoffPct}% voor dit scenario`
+  }
+
+  return `Afhaak ligt op ${kpi.value.dropoffPct}% voor dit scenario`
+})
+
+const behaviorSummary = computed(() => {
+  const pathCounts = filteredSessions.value.reduce((acc, session) => {
+    const pathKey = normalizePath(session.path)
+    if (pathKey === 'A') acc.a += 1
+    if (pathKey === 'B') acc.b += 1
+    return acc
+  }, { a: 0, b: 0 })
+
+  const total = pathCounts.a + pathCounts.b
+  const aPct = total ? Math.round((pathCounts.a / total) * 100) : 0
+  const bPct = total ? Math.round((pathCounts.b / total) * 100) : 0
+
+  const mostPopularPath = bPct >= aPct ? 'B' : 'A'
+  const leastPopularPath = bPct >= aPct ? 'A' : 'B'
+  const mostPopularPct = Math.max(aPct, bPct)
+  const leastPopularPct = Math.min(aPct, bPct)
+
+  return {
+    mostPopularPath,
+    leastPopularPath,
+    mostPopularPct,
+    leastPopularPct,
+    note: total
+      ? `${mostPopularPct}% kiest pad ${mostPopularPath} in dit scenario`
+      : 'Nog geen padgegevens beschikbaar',
+  }
+})
+
+const genders = computed(() => {
+  const defaults = [
+    { key: 'men', label: 'Mannen', matcher: ['m', 'man', 'male', 'mannen'] },
+    { key: 'women', label: 'Vrouwen', matcher: ['v', 'vrouw', 'female', 'vrouwen'] },
+    { key: 'nonbinary', label: 'Non-binair', matcher: ['non-binary', 'nonbinary', 'nb'] },
+    { key: 'prefer', label: 'Wil ik liever niet zeggen', matcher: [] },
+  ]
+
+  return defaults.map((group) => {
+    const groupSessions = filteredSessions.value.filter((session) => {
+      if (group.key === 'prefer') {
+        return !session.gender || session.gender === 'unknown'
+      }
+
+      return group.matcher.includes(session.gender)
+    })
+
+    return calculatePathBreakdown(group.key, group.label, groupSessions)
+  })
+})
+
+const steps = computed(() => {
+  const analyticSteps = extractStepAnalytics(analyticsRows.value)
+  if (analyticSteps.length) return analyticSteps
+
+  const sessionSteps = deriveStepsFromSessions(filteredSessions.value)
+  if (sessionSteps.length) return sessionSteps
+
+  return [
+    { key: 'step-1', title: 'Stap 1', desc: 'Onbekend', padA: 0, padB: 0, drop: 0 },
+  ]
+})
+
+async function loadScenarios() {
+  loadingScenarios.value = true
+  errorMessage.value = ''
+
+  try {
+    const { data, error } = await supabase
+      .from('scenarios')
+      .select('*')
+
+    if (error) throw error
+
+    const mapped = Array.isArray(data) ? data.map(mapScenario).filter(Boolean) : []
+    scenarios.value = mapped
+
+    if (mapped.length) {
+      selectedScenarioKey.value = mapped[0].key
+    } else {
+      selectedScenarioKey.value = ''
+      sessions.value = []
+      reflections.value = []
+      analyticsRows.value = []
+    }
+  } catch (error) {
+    scenarios.value = []
+    selectedScenarioKey.value = ''
+    sessions.value = []
+    reflections.value = []
+    analyticsRows.value = []
+    errorMessage.value = error?.message || 'Scenario\'s konden niet worden geladen.'
+  } finally {
+    loadingScenarios.value = false
+  }
+}
+
+async function loadScenarioData() {
+  if (!selectedScenario.value) return
+
+  loadingScenarioData.value = true
+  errorMessage.value = ''
+
+  try {
+    const [sessionRows, reflectionRows, analyticsData] = await Promise.all([
+      loadSessionsForScenario(selectedScenario.value),
+      loadReflectionsForScenario(selectedScenario.value),
+      loadScenarioAnalytics(selectedScenario.value),
+    ])
+
+    sessions.value = sessionRows
+    reflections.value = reflectionRows
+    analyticsRows.value = analyticsData
+  } catch (error) {
+    sessions.value = []
+    reflections.value = []
+    analyticsRows.value = []
+    errorMessage.value = error?.message || 'Inzichten konden niet worden geladen.'
+  } finally {
+    loadingScenarioData.value = false
+  }
+}
+
+function mapScenario(record) {
+  const id = getFirstString(record, ['id', 'scenario_id', 'uuid'])
+  const slug = getFirstString(record, ['slug'])
+  const title = getFirstString(record, ['title', 'name', 'display_name', 'slug']) || 'Onbekend scenario'
+  const key = id || slug || title
+
+  if (!key) return null
+
+  return { key: String(key), id: id || '', slug: slug || '', title }
+}
+
+async function loadSessionsForScenario(scenario) {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+
+  if (error) throw error
+
+  const rows = Array.isArray(data) ? data : []
+
+  return rows
+    .filter((record) => recordMatchesScenario(record, scenario))
+    .map((record, index) => mapSession(record, index))
+    .sort((left, right) => right.sortStamp - left.sortStamp)
+}
+
+async function loadReflectionsForScenario(scenario) {
+  const { data, error } = await safeSelectTable('reflections')
+  if (error) throw error
+
+  const rows = Array.isArray(data) ? data : []
+  return rows
+    .filter((record) => recordMatchesScenario(record, scenario))
+    .map((record, index) => mapReflection(record, index))
+}
+
+async function loadScenarioAnalytics(scenario) {
+  const { data, error } = await safeSelectTable('scenario_analytics')
+  if (error) throw error
+
+  const rows = Array.isArray(data) ? data : []
+  return rows.filter((record) => recordMatchesScenario(record, scenario))
+}
+
+async function safeSelectTable(tableName) {
+  const { data, error } = await supabase
+    .from(tableName)
+    .select('*')
+
+  if (error) {
+    const message = String(error.message || '').toLowerCase()
+    if (message.includes('does not exist') || message.includes('could not find')) {
+      return { data: [], error: null }
+    }
+  }
+
+  return { data, error }
+}
+
+function recordMatchesScenario(record, scenario) {
+  const recordIdValues = collectRecordValues(record, [
+    'scenario_id',
+    'scenarioId',
+    'id_scenario',
+  ])
+
+  // Prefer strict id matching whenever an id-like field exists on the record.
+  if (recordIdValues.length) {
+    if (!scenario.id) return false
+
+    return recordIdValues.some((value) => String(value) === String(scenario.id))
+  }
+
+  const recordSlugValues = collectRecordValues(record, [
+    'scenario_slug',
+    'slug',
+  ])
+
+  // If slug-like fields are present, match strictly on slug.
+  if (recordSlugValues.length) {
+    if (!scenario.slug) return false
+
+    return recordSlugValues.some((value) => normalizeText(value) === normalizeText(scenario.slug))
+  }
+
+  // Last fallback only when no scenario id/slug fields are available.
+  const recordTitleValues = collectRecordValues(record, [
+    'scenario_title',
+    'scenario',
+    'title',
+    'scenario_name',
+  ])
+
+  return recordTitleValues.some((value) => normalizeText(value) === normalizeText(scenario.title))
+}
+
+function collectRecordValues(record, keys) {
+  const values = []
+
+  for (const key of keys) {
+    const raw = record?.[key]
+
+    if (typeof raw === 'string' && raw.trim()) {
+      values.push(raw.trim())
+      continue
+    }
+
+    if (typeof raw === 'number' && !Number.isNaN(raw)) {
+      values.push(String(raw))
+    }
+  }
+
+  return values
+}
+
+function mapSession(record, index) {
+  const rawId = getFirstString(record, ['id', 'session_id', 'sessionId', 'uuid']) || `session-${index + 1}`
+  const startDate = getFirstDate(record, ['started_at', 'start_at', 'start_time', 'created_at'])
+  const endDate = getFirstDate(record, ['ended_at', 'end_at', 'end_time', 'updated_at'])
+  const dateObj = startDate || endDate || getFirstDate(record, ['created_at'])
+  const statusKey = normalizeStatusKey(getFirstString(record, ['status', 'state']))
+  const path = getFirstString(record, ['path', 'selected_path', 'decision_path', 'result_path', 'choice'])
+  const gender = normalizeGender(getFirstString(record, ['gender', 'user_gender', 'sex']))
+
+  return {
+    id: shortenId(rawId),
+    statusKey,
+    path,
+    gender,
+    dateObj,
+    durationMinutes: getDurationFromRecord(record, startDate, endDate),
+    step: getFirstString(record, ['step', 'current_step', 'session_step', 'stage']),
+    date: formatDate(dateObj),
+    sortStamp: dateObj?.getTime?.() || 0,
+  }
+}
+
+function mapReflection(record, index) {
+  const rawDate = getFirstDate(record, ['created_at', 'date', 'reflection_date', 'submitted_at'])
+
+  return {
+    id: getFirstString(record, ['user_id', 'id', 'reflection_id']) || `r-${index + 1}`,
+    date: formatDate(rawDate),
+    age: getFirstNumber(record, ['age', 'user_age']) ?? 'Onbekend',
+    gender: getFirstString(record, ['gender', 'user_gender']) || 'Onbekend',
+    text: getFirstString(record, ['text', 'reflection', 'content', 'message']) || 'Onbekend',
+  }
+}
+
+function extractStepAnalytics(rows) {
+  if (!rows.length) return []
+
+  const source = rows[0]
+  const candidates = [source?.step_analytics, source?.steps, source?.dropoff_steps]
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue
+
+    const mapped = candidate.map((item, index) => {
+      const title = getFirstString(item, ['title', 'label', 'step']) || `Stap ${index + 1}`
+      const desc = getFirstString(item, ['desc', 'description']) || 'Onbekend'
+      const padA = clampPercent(getFirstNumber(item, ['pad_a', 'path_a', 'a', 'padA']) ?? 0)
+      const padB = clampPercent(getFirstNumber(item, ['pad_b', 'path_b', 'b', 'padB']) ?? 0)
+      const drop = clampPercent(getFirstNumber(item, ['drop', 'dropoff', 'afhaak']) ?? 0)
+
+      return {
+        key: `step-analytics-${index}`,
+        title,
+        desc,
+        padA,
+        padB,
+        drop,
+      }
+    })
+
+    if (mapped.length) return mapped
+  }
+
+  return []
+}
+
+function deriveStepsFromSessions(sessionRows) {
+  const groups = new Map()
+
+  for (const session of sessionRows) {
+    const rawStep = session.step
+    if (!rawStep) continue
+
+    const key = String(rawStep)
+    if (!groups.has(key)) {
+      groups.set(key, { total: 0, a: 0, b: 0, drop: 0 })
+    }
+
+    const group = groups.get(key)
+    group.total += 1
+
+    const path = normalizePath(session.path)
+    if (path === 'A') group.a += 1
+    if (path === 'B') group.b += 1
+    if (session.statusKey === 'stopped') group.drop += 1
+  }
+
+  const entries = Array.from(groups.entries())
+  entries.sort((left, right) => normalizeStepOrder(left[0]) - normalizeStepOrder(right[0]))
+
+  return entries.map(([stepKey, value], index) => {
+    const total = value.total || 1
+    return {
+      key: `step-session-${stepKey}`,
+      title: `Stap ${index + 1}`,
+      desc: String(stepKey),
+      padA: Math.round((value.a / total) * 100),
+      padB: Math.round((value.b / total) * 100),
+      drop: Math.round((value.drop / total) * 100),
+    }
+  })
+}
+
+function calculatePathBreakdown(key, label, sessionRows) {
+  const total = sessionRows.length
+  const aCount = sessionRows.filter((session) => normalizePath(session.path) === 'A').length
+  const bCount = sessionRows.filter((session) => normalizePath(session.path) === 'B').length
+  const dropCount = sessionRows.filter((session) => session.statusKey === 'stopped').length
+
+  return {
+    key,
+    label,
+    padA: total ? Math.round((aCount / total) * 100) : 0,
+    padB: total ? Math.round((bCount / total) * 100) : 0,
+    drop: total ? Math.round((dropCount / total) * 100) : 0,
+  }
+}
+
+function normalizePath(path) {
+  const value = normalizeText(path)
+  if (!value) return ''
+  if (value === 'a' || value.includes('pad a') || value.includes('path a')) return 'A'
+  if (value === 'b' || value.includes('pad b') || value.includes('path b')) return 'B'
+  return ''
+}
+
+function normalizeGender(gender) {
+  const value = normalizeText(gender)
+  if (!value) return 'unknown'
+  return value
+}
+
+function normalizeStatusKey(status) {
+  const value = normalizeText(status)
+  if (value === 'completed' || value === 'voltooid') return 'completed'
+  if (value === 'stopped' || value === 'gestopt') return 'stopped'
+  if (value === 'active' || value === 'actief') return 'active'
+  return 'unknown'
+}
+
+function normalizeStepOrder(stepValue) {
+  const number = Number(String(stepValue).replace(/[^0-9]/g, ''))
+  if (!Number.isNaN(number) && number > 0) return number
+  return Number.MAX_SAFE_INTEGER
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function getDurationFromRecord(record, startDate, endDate) {
+  const directMinutes = getFirstNumber(record, ['duration_minutes', 'duration', 'session_duration'])
+  if (typeof directMinutes === 'number' && directMinutes > 0) return directMinutes
+
+  if (startDate && endDate) {
+    const diff = endDate.getTime() - startDate.getTime()
+    if (diff > 0) return Math.round(diff / 60000)
+  }
+
+  return 0
+}
+
+function getFirstString(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number') return String(value)
+  }
+
+  return ''
+}
+
+function getFirstNumber(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key]
+    if (typeof value === 'number' && !Number.isNaN(value)) return value
+
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value.replace(',', '.'))
+      if (!Number.isNaN(parsed)) return parsed
+    }
+  }
+
+  return null
+}
+
+function getFirstDate(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key]
+    if (!value) continue
+
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+
+  return null
+}
+
+function shortenId(value) {
+  const text = String(value)
+  if (text.length <= 10) return text
+  return text.slice(0, 10)
+}
+
+function formatDate(date) {
+  if (!date) return 'Onbekend'
+
+  return new Intl.DateTimeFormat('nl-NL', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
+}
+
+function isInCurrentWeek(date) {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const day = today.getDay() || 7
+  const start = new Date(today)
+  start.setDate(today.getDate() - day + 1)
+  const end = new Date(start)
+  end.setDate(start.getDate() + 7)
+
+  return date >= start && date < end
+}
+
+function isSameDay(left, right) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+}
+
+function clampPercent(value) {
+  const number = Number(value)
+  if (Number.isNaN(number)) return 0
+  return Math.min(100, Math.max(0, Math.round(number)))
+}
 </script>
 
 <style scoped>
