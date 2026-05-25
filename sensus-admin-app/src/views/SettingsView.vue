@@ -7,14 +7,17 @@
           <p class="subtitle">Pas je gegevens aan</p>
         </div>
 
-        <button type="button" class="save-button" @click="onSave" :disabled="saving">
+        <button type="button" class="save-button" @click="onSave" :disabled="saving || uploadingAvatar || loading">
           <img :src="PlusIcon" alt="plus" class="save-img" />
           <span>Opslaan</span>
         </button>
       </div>
 
       <div class="card-body">
-        <form class="settings-form" @submit.prevent="onSave">
+        <div v-if="loading" class="state-message">Gegevens laden...</div>
+        <div v-else-if="errorMessage" class="state-message state-error">{{ errorMessage }}</div>
+
+        <form v-else class="settings-form" @submit.prevent="onSave">
           <div class="form-left">
             <div class="form-column">
               <label class="label">Profielfoto</label>
@@ -28,7 +31,7 @@
                     <div v-else class="initials">{{ initials }}</div>
                   </div>
 
-                  <button type="button" class="avatar-edit" @click.prevent="triggerFileInput" aria-label="Wijzig profielfoto">
+                  <button type="button" class="avatar-edit" @click.prevent="triggerFileInput" aria-label="Wijzig profielfoto" :disabled="uploadingAvatar || loading || saving">
                     <img :src="PenIcon" alt="edit" />
                   </button>
                 </div>
@@ -60,7 +63,7 @@
                   <label class="label">Wachtwoord</label>
                   <div class="password-wrap">
                     <input :type="showPassword ? 'text' : 'password'" v-model="form.password" class="input password-input" />
-                    <button type="button" class="eye-button" @click="togglePassword" :aria-pressed="showPassword">
+                    <button type="button" class="eye-button" @click="togglePassword" :aria-pressed="showPassword" :disabled="loading">
                       <img v-if="!showPassword" :src="EyeIcon" alt="toon" />
                       <img v-else :src="EyeCrossedIcon" alt="verberg" />
                     </button>
@@ -73,30 +76,38 @@
           <div class="form-right"><!-- keep whitespace to the right per Figma --></div>
         </form>
 
-        <div v-if="successMessage" class="toast">{{ successMessage }}</div>
+        <div v-if="successMessage && !loading" class="toast">{{ successMessage }}</div>
       </div>
     </section>
   </main>
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import PlusIcon from '@/assets/icons/plus.svg'
 import PenIcon from '@/assets/icons/pen.svg'
 import EyeIcon from '@/assets/icons/eye.svg'
 import EyeCrossedIcon from '@/assets/icons/eye-crossed.svg'
+import { supabase } from '@/services/supabase'
+import { useAuthStore } from '@/stores/auth'
 
+const loading = ref(true)
 const saving = ref(false)
+const uploadingAvatar = ref(false)
+const errorMessage = ref('')
 const successMessage = ref('')
 const showPassword = ref(false)
 const fileInput = ref(null)
+const currentUserId = ref('')
+const profileAvatarUrl = ref('')
+const authStore = useAuthStore()
 
 const form = reactive({
-  firstName: 'Philip',
-  lastName: 'Davids',
-  jobTitle: 'Admin',
-  email: 'philip.davids@sensus.be',
-  password: 'password123',
+  firstName: '',
+  lastName: '',
+  jobTitle: '',
+  email: '',
+  password: '',
   avatarUrl: '',
   avatarFile: null,
 })
@@ -111,33 +122,204 @@ function triggerFileInput() {
   fileInput.value?.click()
 }
 
-function onFileChange(event) {
+async function onFileChange(event) {
   const f = event.target.files && event.target.files[0]
   if (!f) return
+
+  if (!currentUserId.value) {
+    errorMessage.value = 'Geen gebruiker gevonden voor avatar upload.'
+    return
+  }
+
+  errorMessage.value = ''
+  successMessage.value = ''
+  uploadingAvatar.value = true
   form.avatarFile = f
 
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    form.avatarUrl = e.target.result
+  try {
+    form.avatarUrl = await toDataUrl(f)
+
+    const fileExtension = getFileExtension(f.name)
+    const filePath = `${currentUserId.value}/${Date.now()}-${crypto.randomUUID()}.${fileExtension}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, f, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: f.type || undefined,
+      })
+
+    if (uploadError) throw uploadError
+
+    const { data: publicData } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(filePath)
+
+    const publicUrl = publicData?.publicUrl || ''
+    if (!publicUrl) {
+      throw new Error('Public URL voor avatar kon niet opgehaald worden.')
+    }
+
+    const { error: updateError } = await supabase
+      .from('admin_profiles')
+      .update({ avatar_url: publicUrl })
+      .eq('user_id', currentUserId.value)
+
+    if (updateError) throw updateError
+
+    form.avatarUrl = publicUrl
+    profileAvatarUrl.value = publicUrl
+
+    // refresh topbar and any component using auth profile
+    authStore.profile = {
+      ...(authStore.profile || {}),
+      avatar_url: publicUrl,
+    }
+    await authStore.fetchProfile()
+
+    successMessage.value = 'Profielfoto opgeslagen'
+    setTimeout(() => (successMessage.value = ''), 2500)
+  } catch (error) {
+    errorMessage.value = error?.message || 'Uploaden van profielfoto is mislukt.'
+  } finally {
+    uploadingAvatar.value = false
+    if (event?.target) {
+      event.target.value = ''
+    }
   }
-  reader.readAsDataURL(f)
 }
 
 function togglePassword() {
   showPassword.value = !showPassword.value
 }
 
-function onSave() {
-  if (saving.value) return
-  saving.value = true
+onMounted(() => {
+  void loadSettings()
+})
+
+async function loadSettings() {
+  loading.value = true
+  errorMessage.value = ''
   successMessage.value = ''
 
-  // simulate save
-  setTimeout(() => {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+
+    if (userError) throw userError
+    if (!user) throw new Error('Geen ingelogde gebruiker gevonden.')
+
+    currentUserId.value = user.id
+    form.email = user.email || ''
+
+    const { data: profile, error: profileError } = await supabase
+      .from('admin_profiles')
+      .select('display_name, role, avatar_url')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (profileError) throw profileError
+
+    if (profile) {
+      const { firstName, lastName } = splitDisplayName(profile.display_name)
+
+      form.firstName = firstName
+      form.lastName = lastName
+      form.jobTitle = profile.role || ''
+      form.avatarUrl = profile.avatar_url || ''
+      profileAvatarUrl.value = profile.avatar_url || ''
+    }
+  } catch (error) {
+    errorMessage.value = error?.message || 'Instellingen konden niet geladen worden.'
+  } finally {
+    loading.value = false
+  }
+}
+
+function splitDisplayName(displayName) {
+  if (!displayName || typeof displayName !== 'string') {
+    return { firstName: '', lastName: '' }
+  }
+
+  const parts = displayName.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) {
+    return { firstName: '', lastName: '' }
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(' '),
+  }
+}
+
+async function onSave() {
+  if (saving.value || loading.value || uploadingAvatar.value) return
+
+  if (!currentUserId.value) {
+    errorMessage.value = 'Geen gebruiker gevonden om op te slaan.'
+    return
+  }
+
+  saving.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+
+  try {
+    const fullName = [form.firstName, form.lastName].filter(Boolean).join(' ').trim()
+    const avatarUrlForUpdate = form.avatarUrl && !form.avatarUrl.startsWith('data:')
+      ? form.avatarUrl
+      : profileAvatarUrl.value
+
+    const { error } = await supabase
+      .from('admin_profiles')
+      .update({
+        display_name: fullName || null,
+        role: form.jobTitle?.trim() || null,
+        avatar_url: avatarUrlForUpdate || null,
+      })
+      .eq('user_id', currentUserId.value)
+
+    if (error) throw error
+
+    profileAvatarUrl.value = avatarUrlForUpdate || ''
+    authStore.profile = {
+      ...(authStore.profile || {}),
+      display_name: fullName || '',
+      role: form.jobTitle?.trim() || '',
+      avatar_url: profileAvatarUrl.value,
+    }
+    await authStore.fetchProfile()
+
     saving.value = false
     successMessage.value = 'Instellingen opgeslagen'
     setTimeout(() => (successMessage.value = ''), 2500)
-  }, 800)
+  } catch (error) {
+    errorMessage.value = error?.message || 'Opslaan mislukt. Probeer opnieuw.'
+  } finally {
+    saving.value = false
+  }
+}
+
+function toDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => resolve(e?.target?.result || '')
+    reader.onerror = () => reject(new Error('Avatar preview kon niet geladen worden.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function getFileExtension(fileName) {
+  const extension = fileName?.split('.').pop()?.toLowerCase()
+
+  if (!extension || extension.length > 5) {
+    return 'jpg'
+  }
+
+  return extension
 }
 </script>
 
@@ -207,6 +389,7 @@ function onSave() {
   display:flex; align-items:center; justify-content:center; cursor:pointer;
 }
 .avatar-edit img { width:14px; height:14px }
+.avatar-edit:disabled { opacity: 0.6; cursor: default }
 
 .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0 }
 
@@ -236,9 +419,30 @@ function onSave() {
 }
 .eye-button svg { width:18px; height:18px }
 .eye-button img { width:18px; height:18px }
+.eye-button:disabled { opacity: 0.6; cursor: default }
 
 /* Toast */
 .toast { margin-top:18px; display:inline-block; background: #e6fff0; border:1px solid rgba(33,222,74,0.12); color: var(--color-success); padding:8px 12px; border-radius:8px; font-weight:600 }
+
+/* Loading / error state */
+.state-message {
+  width: 320px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text-soft);
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.state-error {
+  color: var(--color-danger);
+  border-color: rgba(255, 0, 0, 0.2);
+  background: rgba(255, 0, 0, 0.04);
+}
 
 /* Remove default button appearance globally inside this component */
 button { appearance: none; -webkit-appearance: none; -moz-appearance: none }
