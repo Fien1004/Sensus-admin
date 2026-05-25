@@ -67,7 +67,23 @@
             </tr>
           </thead>
 
-          <tbody v-if="filteredSessions.length">
+          <tbody v-if="loading">
+            <tr>
+              <td colspan="8">
+                <div class="empty-state">Sessies laden...</div>
+              </td>
+            </tr>
+          </tbody>
+
+          <tbody v-else-if="errorMessage">
+            <tr>
+              <td colspan="8">
+                <div class="empty-state table-state-error">{{ errorMessage }}</div>
+              </td>
+            </tr>
+          </tbody>
+
+          <tbody v-else-if="filteredSessions.length">
             <tr v-for="item in filteredSessions" :key="item.id" class="session-row">
               <td class="checkbox-col">
                 <input type="checkbox" class="checkbox" :aria-label="`Selecteer ${item.id}`" />
@@ -78,7 +94,7 @@
               <td>{{ item.start }}</td>
               <td>{{ item.end }}</td>
               <td>
-                <span :class="['status-badge', item.status === 'Voltooid' ? 'status--done' : 'status--stopped']">{{ item.status }}</span>
+                <span :class="['status-badge', statusClass(item.status)]">{{ item.status }}</span>
               </td>
               <td class="actions-col">
                 <button type="button" class="actions-button" aria-label="Acties">⋯</button>
@@ -99,37 +115,37 @@
       <footer class="pagination">
         <div></div>
         <div>
-          <button type="button" class="pagination-button">‹ Vorige</button>
+          <button type="button" class="pagination-button" :disabled="isPreviousDisabled" @click="goToPreviousPage">‹ Vorige</button>
           <span class="pagination-divider"></span>
-          <button type="button" class="pagination-button">Volgende ›</button>
+          <button type="button" class="pagination-button" :disabled="isNextDisabled" @click="goToNextPage">Volgende ›</button>
         </div>
       </footer>
 
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Sessies deze week</div>
-          <div class="kpi-value">128</div>
-          <div class="kpi-meta">↑ 12% deze week</div>
+          <div class="kpi-value">{{ kpi.sessionsThisWeek }}</div>
+          <div class="kpi-meta">Op basis van live data</div>
         </div>
 
         <div class="kpi-card">
           <div class="kpi-label">Voltooid</div>
-          <div class="kpi-value">70%</div>
+          <div class="kpi-value">{{ kpi.completedPct }}%</div>
         </div>
 
         <div class="kpi-card">
           <div class="kpi-label">Gem. sessie duur</div>
-          <div class="kpi-value">11 min</div>
+          <div class="kpi-value">{{ kpi.avgDuration }}</div>
         </div>
 
         <div class="kpi-card">
           <div class="kpi-label">Afhaak %</div>
-          <div class="kpi-value">32%</div>
+          <div class="kpi-value">{{ kpi.dropoffPct }}%</div>
         </div>
 
         <div class="kpi-card">
           <div class="kpi-label">Offline %</div>
-          <div class="kpi-value">30%</div>
+          <div class="kpi-value">{{ kpi.offlinePct }}%</div>
         </div>
       </div>
     </section>
@@ -137,38 +153,219 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { supabase } from '@/services/supabase'
 
+const pageSize = 10
+const loading = ref(true)
+const errorMessage = ref('')
 const searchQuery = ref('')
 const selectedScenario = ref('all')
 const selectedDate = ref('all')
 const activeTab = ref('all')
+const currentPage = ref(1)
+const sessions = ref([])
 
-const tabs = [
-  { key: 'all', label: 'Alle sessies' },
-  { key: 'active', label: 'Actief (6)' },
-  { key: 'completed', label: 'Voltooid (2)' },
-]
+onMounted(() => {
+  void loadSessions()
+})
 
-const sessions = ref([
-  { id: '1ahb', scenario: 'Online gedrag', date: '17 dec 2025', start: '14:03', end: '14:14', status: 'Voltooid' },
-  { id: 'lp2', scenario: 'Online gedrag', date: '17 dec 2025', start: '14:07', end: '14:23', status: 'Voltooid' },
-  { id: 'mpj6', scenario: 'Online gedrag', date: '17 dec 2025', start: '14:07', end: '14:10', status: 'Gestopt' },
-  { id: 'shuo7', scenario: 'Online gedrag', date: '17 dec 2025', start: '14:10', end: '14:19', status: 'Gestopt' },
-  { id: '1nj', scenario: 'Online gedrag', date: '17 dec 2025', start: '14:11', end: '14:25', status: 'Voltooid' },
-])
+async function loadSessions() {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    const [{ data: sessionsRaw, error: sessionsError }, { data: scenariosRaw, error: scenariosError }] = await Promise.all([
+      supabase.from('sessions').select('*'),
+      supabase.from('scenarios').select('*'),
+    ])
+
+    if (sessionsError) throw sessionsError
+    if (scenariosError) throw scenariosError
+
+    const scenarioMap = buildScenarioMap(Array.isArray(scenariosRaw) ? scenariosRaw : [])
+    const rows = Array.isArray(sessionsRaw)
+      ? sessionsRaw.map((record, index) => mapSessionRecord(record, index, scenarioMap))
+      : []
+
+    sessions.value = rows.sort((left, right) => right.sortStamp - left.sortStamp)
+  } catch (error) {
+    sessions.value = []
+    errorMessage.value = error?.message || 'Sessies konden niet worden geladen.'
+  } finally {
+    loading.value = false
+  }
+}
+
+function buildScenarioMap(scenarios) {
+  const map = new Map()
+
+  for (const scenario of scenarios) {
+    const title = getScenarioTitle(scenario)
+    const idCandidates = [scenario?.id, scenario?.scenario_id, scenario?.uuid, scenario?.slug].filter(Boolean)
+
+    for (const key of idCandidates) {
+      map.set(String(key), title)
+    }
+  }
+
+  return map
+}
+
+function mapSessionRecord(record, index, scenarioMap) {
+  const rawId = getFirstString(record, ['id', 'session_id', 'sessionId', 'uuid']) || `sessie-${index + 1}`
+  const id = shortenId(rawId)
+
+  const startDate = getFirstDate(record, ['started_at', 'start_at', 'start_time', 'created_at'])
+  const endDate = getFirstDate(record, ['ended_at', 'end_at', 'end_time', 'updated_at'])
+  const displayDate = startDate || endDate || getFirstDate(record, ['created_at'])
+
+  const rawStatus = getFirstString(record, ['status', 'state'])
+  const normalizedStatus = normalizeStatus(rawStatus)
+  const isOffline = getOfflineState(record)
+
+  const scenarioId = getFirstString(record, ['scenario_id', 'scenarioId'])
+  const scenarioFromSession = getFirstString(record, ['scenario_title', 'scenario', 'title'])
+  const scenario = scenarioFromSession || (scenarioId ? scenarioMap.get(String(scenarioId)) : '') || 'Onbekend scenario'
+
+  return {
+    id,
+    scenario,
+    date: formatDate(displayDate),
+    start: formatTime(startDate),
+    end: formatTime(endDate),
+    status: normalizedStatus,
+    statusKey: statusKeyFromLabel(normalizedStatus),
+    isOffline,
+    durationMinutes: calculateDurationMinutes(startDate, endDate),
+    sessionDate: displayDate,
+    sortStamp: displayDate?.getTime?.() || 0,
+  }
+}
+
+function getScenarioTitle(scenario) {
+  return getFirstString(scenario, ['title', 'name', 'display_name', 'slug']) || 'Onbekend scenario'
+}
+
+function getFirstString(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number') return String(value)
+  }
+
+  return ''
+}
+
+function getFirstDate(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key]
+    if (!value) continue
+
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+
+  return null
+}
+
+function shortenId(id) {
+  const text = String(id)
+  return text.length > 8 ? text.slice(0, 8) : text
+}
+
+function normalizeStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+
+  if (normalized === 'completed' || normalized === 'voltooid') return 'Voltooid'
+  if (normalized === 'stopped' || normalized === 'gestopt') return 'Gestopt'
+  if (normalized === 'active' || normalized === 'actief') return 'Actief'
+  return 'Onbekend'
+}
+
+function statusKeyFromLabel(label) {
+  if (label === 'Voltooid') return 'completed'
+  if (label === 'Gestopt') return 'stopped'
+  if (label === 'Actief') return 'active'
+  return 'unknown'
+}
+
+function statusClass(statusLabel) {
+  if (statusLabel === 'Voltooid') return 'status--done'
+  if (statusLabel === 'Gestopt') return 'status--stopped'
+  if (statusLabel === 'Actief') return 'status--active'
+  return 'status--unknown'
+}
+
+function getOfflineState(record) {
+  const booleanKeys = ['is_offline', 'offline']
+  for (const key of booleanKeys) {
+    if (typeof record?.[key] === 'boolean') return record[key]
+  }
+
+  const channel = getFirstString(record, ['mode', 'channel', 'session_type', 'type']).toLowerCase()
+  if (!channel) return false
+  return channel.includes('offline')
+}
+
+function formatDate(date) {
+  if (!date) return 'Onbekende datum'
+  return new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' }).format(date)
+}
+
+function formatTime(date) {
+  if (!date) return '--:--'
+  return new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
+}
+
+function calculateDurationMinutes(startDate, endDate) {
+  if (!startDate || !endDate) return null
+
+  const diffMs = endDate.getTime() - startDate.getTime()
+  if (diffMs <= 0) return null
+
+  return Math.round(diffMs / 60000)
+}
+
+function isSameCalendarDay(left, right) {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate()
+}
+
+function isInCurrentWeek(date) {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const day = today.getDay() || 7
+  const start = new Date(today)
+  start.setDate(today.getDate() - day + 1)
+  const end = new Date(start)
+  end.setDate(start.getDate() + 7)
+
+  return date >= start && date < end
+}
+
+const tabs = computed(() => {
+  const all = sessions.value.length
+  const active = sessions.value.filter((s) => s.statusKey === 'active').length
+  const completed = sessions.value.filter((s) => s.statusKey === 'completed').length
+
+  return [
+    { key: 'all', label: `Alle sessies (${all})` },
+    { key: 'active', label: `Actief (${active})` },
+    { key: 'completed', label: `Voltooid (${completed})` },
+  ]
+})
 
 const scenarioOptions = computed(() => [...new Set(sessions.value.map((s) => s.scenario))])
 
-const filteredSessions = computed(() => {
+const filteredSessionsAll = computed(() => {
   let items = [...sessions.value]
 
   if (activeTab.value === 'active') {
-    items = items.filter((s) => s.status !== 'Voltooid')
+    items = items.filter((s) => s.statusKey === 'active')
   }
 
   if (activeTab.value === 'completed') {
-    items = items.filter((s) => s.status === 'Voltooid')
+    items = items.filter((s) => s.statusKey === 'completed')
   }
 
   const q = searchQuery.value.trim().toLowerCase()
@@ -180,7 +377,81 @@ const filteredSessions = computed(() => {
     items = items.filter((s) => s.scenario === selectedScenario.value)
   }
 
+  if (selectedDate.value === 'today') {
+    const today = new Date()
+    items = items.filter((s) => s.sessionDate && isSameCalendarDay(s.sessionDate, today))
+  }
+
+  if (selectedDate.value === 'week') {
+    items = items.filter((s) => s.sessionDate && isInCurrentWeek(s.sessionDate))
+  }
+
   return items
+})
+
+const totalPages = computed(() => {
+  const totalItems = filteredSessionsAll.value.length
+  return Math.max(1, Math.ceil(totalItems / pageSize))
+})
+
+const filteredSessions = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  const end = start + pageSize
+
+  return filteredSessionsAll.value.slice(start, end)
+})
+
+const isPreviousDisabled = computed(() => currentPage.value <= 1 || loading.value)
+const isNextDisabled = computed(() => currentPage.value >= totalPages.value || loading.value)
+
+function goToPreviousPage() {
+  if (isPreviousDisabled.value) return
+  currentPage.value -= 1
+}
+
+function goToNextPage() {
+  if (isNextDisabled.value) return
+  currentPage.value += 1
+}
+
+watch([searchQuery, selectedScenario, selectedDate, activeTab], () => {
+  currentPage.value = 1
+})
+
+watch(filteredSessionsAll, () => {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = totalPages.value
+  }
+
+  if (currentPage.value < 1) {
+    currentPage.value = 1
+  }
+})
+
+const kpi = computed(() => {
+  const all = sessions.value
+  const total = all.length
+
+  const completedCount = all.filter((s) => s.statusKey === 'completed').length
+  const stoppedCount = all.filter((s) => s.statusKey === 'stopped').length
+  const offlineCount = all.filter((s) => s.isOffline).length
+  const thisWeekCount = all.filter((s) => s.sessionDate && isInCurrentWeek(s.sessionDate)).length
+
+  const durationSource = all
+    .map((s) => s.durationMinutes)
+    .filter((value) => typeof value === 'number' && value >= 0)
+
+  const avgDuration = durationSource.length
+    ? `${Math.round(durationSource.reduce((sum, value) => sum + value, 0) / durationSource.length)} min`
+    : '0 min'
+
+  return {
+    sessionsThisWeek: thisWeekCount,
+    completedPct: total ? Math.round((completedCount / total) * 100) : 0,
+    avgDuration,
+    dropoffPct: total ? Math.round((stoppedCount / total) * 100) : 0,
+    offlinePct: total ? Math.round((offlineCount / total) * 100) : 0,
+  }
 })
 </script>
 
@@ -401,6 +672,20 @@ const filteredSessions = computed(() => {
   color: var(--color-danger);
 }
 
+.status--active {
+  background: rgba(0, 119, 255, 0.12);
+  color: var(--color-info);
+}
+
+.status--unknown {
+  background: rgba(108, 117, 125, 0.12);
+  color: var(--color-neutral-700);
+}
+
+.table-state-error {
+  color: var(--color-danger);
+}
+
 .empty-state {
   min-height: 96px;
   display: flex;
@@ -428,6 +713,11 @@ const filteredSessions = computed(() => {
   font-weight: 600;
   cursor: pointer;
   padding: 4px 0;
+}
+
+.pagination-button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .pagination-divider {
