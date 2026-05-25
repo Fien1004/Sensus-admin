@@ -5,13 +5,13 @@
       <p class="state-text">De data uit Supabase wordt opgehaald.</p>
     </section>
 
-    <section v-else-if="errorMessage" class="card dashboard-state dashboard-state-error" aria-live="assertive">
-      <p class="state-title">Dashboard kan niet geladen worden.</p>
+    <section v-if="errorMessage" class="card dashboard-state dashboard-state-error" aria-live="assertive">
+      <p class="state-title">Dashboard kan niet volledig geladen worden.</p>
       <p class="state-text">{{ errorMessage }}</p>
-      <button type="button" class="retry-button" @click="loadDashboard">Opnieuw proberen</button>
+      <button type="button" class="retry-button" @click="loadDashboard">Opnieuw laden</button>
     </section>
 
-    <template v-else>
+    <section v-if="!loading" class="dashboard-content">
       <section class="kpi-grid" aria-label="KPI overzicht">
         <article v-for="card in kpiCards" :key="card.label" class="card kpi-card">
           <p class="card-label">{{ card.label }}</p>
@@ -29,6 +29,7 @@
             <table class="sessions-table">
               <thead>
                 <tr>
+                  <th>ID</th>
                   <th>Datum</th>
                   <th>Scenario</th>
                   <th>Status</th>
@@ -37,6 +38,7 @@
               </thead>
               <tbody v-if="recentSessions.length">
                 <tr v-for="session in recentSessions" :key="session.key">
+                  <td class="session-id-cell">{{ session.shortId }}</td>
                   <td>{{ session.date }}</td>
                   <td class="scenario-cell">{{ session.scenario }}</td>
                   <td>
@@ -50,7 +52,7 @@
               </tbody>
               <tbody v-else>
                 <tr>
-                  <td colspan="4">
+                  <td colspan="5">
                     <div class="empty-state">Geen sessies gevonden.</div>
                   </td>
                 </tr>
@@ -67,6 +69,10 @@
           </header>
 
           <div v-if="popularScenarios.length" class="scenario-list">
+            <div class="scenario-list-head">
+              <span>Scenario</span>
+              <span class="scenario-list-head-count">Sessies</span>
+            </div>
             <div v-for="scenario in popularScenarios" :key="scenario.key" class="scenario-row">
               <span class="scenario-name">{{ scenario.name }}</span>
 
@@ -100,18 +106,22 @@
           </div>
         </article>
       </section>
-    </template>
+      </section>
   </main>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { supabase } from '@/services/supabase'
 
 const loading = ref(true)
 const errorMessage = ref('')
 const sessions = ref([])
 const scenarios = ref([])
+const events = ref([])
+
+let sessionsChannel = null
+let eventsChannel = null
 
 const dateFormatter = new Intl.DateTimeFormat('nl-NL', {
   day: 'numeric',
@@ -120,34 +130,97 @@ const dateFormatter = new Intl.DateTimeFormat('nl-NL', {
 })
 
 onMounted(() => {
+  setupRealtimeSubscriptions()
   void loadDashboard()
 })
 
-async function loadDashboard() {
-  loading.value = true
+onUnmounted(() => {
+  cleanupRealtimeSubscriptions()
+})
+
+async function loadDashboard(options = {}) {
+  const silent = Boolean(options.silent)
+
+  if (!silent) {
+    loading.value = true
+  }
+
   errorMessage.value = ''
 
   try {
-    const [sessionsResult, scenariosResult] = await Promise.all([
-      supabase.from('sessions').select('*'),
-      supabase.from('scenarios').select('*'),
+    const [sessionsResult, eventsResult, scenariosResult] = await Promise.all([
+      supabase.from('sessions').select('*').order('started_at', { ascending: false }),
+      safeSelectTable('events'),
+      safeSelectTable('scenarios'),
     ])
 
     if (sessionsResult.error) throw sessionsResult.error
-    if (scenariosResult.error) throw scenariosResult.error
 
     sessions.value = Array.isArray(sessionsResult.data) ? sessionsResult.data : []
+    events.value = Array.isArray(eventsResult.data) ? eventsResult.data : []
     scenarios.value = Array.isArray(scenariosResult.data) ? scenariosResult.data : []
+
+    const secondaryError = [eventsResult.error, scenariosResult.error].find(Boolean)
+    if (secondaryError) {
+      errorMessage.value = secondaryError.message || 'Niet alle dashboarddata kon worden geladen.'
+    }
   } catch (error) {
+    console.error('Dashboard data kon niet worden geladen.', error)
     sessions.value = []
     scenarios.value = []
+    events.value = []
     errorMessage.value = error?.message || 'Dashboard data kon niet worden geladen.'
   } finally {
-    loading.value = false
+    if (!silent) {
+      loading.value = false
+    }
   }
 }
 
-function normalizeKey(value) {
+function setupRealtimeSubscriptions() {
+  sessionsChannel = supabase
+    .channel('dashboard-sessions-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => {
+      void loadDashboard({ silent: true })
+    })
+    .subscribe()
+
+  eventsChannel = supabase
+    .channel('dashboard-events-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
+      void loadDashboard({ silent: true })
+    })
+    .subscribe()
+}
+
+function cleanupRealtimeSubscriptions() {
+  if (sessionsChannel) {
+    void supabase.removeChannel(sessionsChannel)
+    sessionsChannel = null
+  }
+
+  if (eventsChannel) {
+    void supabase.removeChannel(eventsChannel)
+    eventsChannel = null
+  }
+}
+
+async function safeSelectTable(tableName) {
+  const { data, error } = await supabase.from(tableName).select('*')
+
+  if (error) {
+    console.error(`Tabel '${tableName}' kon niet worden geladen.`, error)
+
+    const message = String(error.message || '').toLowerCase()
+    if (message.includes('does not exist') || message.includes('could not find')) {
+      return { data: [], error: null }
+    }
+  }
+
+  return { data, error }
+}
+
+function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase()
 }
 
@@ -157,6 +230,10 @@ function getFirstString(record, keys) {
 
     if (typeof value === 'string' && value.trim()) {
       return value.trim()
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value)
     }
   }
 
@@ -184,13 +261,17 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function getWeekStart(date) {
-  const weekStart = new Date(date)
-  const day = weekStart.getDay()
-  const diff = weekStart.getDate() - day + (day === 0 ? -6 : 1)
-  weekStart.setDate(diff)
-  weekStart.setHours(0, 0, 0, 0)
-  return weekStart
+function getFirstDate(record, keys) {
+  for (const key of keys) {
+    const value = record?.[key]
+    const date = toDate(value)
+
+    if (date) {
+      return date
+    }
+  }
+
+  return null
 }
 
 function getScenarioName(record) {
@@ -198,7 +279,7 @@ function getScenarioName(record) {
 }
 
 function getScenarioKey(record) {
-  return normalizeKey(record?.id ?? record?.scenario_id ?? record?.scenarioId ?? record?.uuid ?? record?.slug ?? getScenarioName(record))
+  return normalizeText(record?.slug ?? record?.id ?? record?.scenario_id ?? record?.scenarioId ?? record?.uuid)
 }
 
 const scenarioMap = computed(() => {
@@ -211,66 +292,83 @@ const scenarioMap = computed(() => {
     if (scenarioKey) {
       map.set(scenarioKey, scenarioTitle)
     }
+  })
 
-    const titleKey = normalizeKey(scenarioTitle)
-    if (titleKey) {
-      map.set(titleKey, scenarioTitle)
+  return map
+})
+
+const eventTimelines = computed(() => {
+  const map = new Map()
+
+  events.value.forEach((event) => {
+    const sessionKey = getEventSessionKey(event)
+    if (!sessionKey) {
+      return
+    }
+
+    const timestamp = getEventTimestamp(event)
+    if (!map.has(sessionKey)) {
+      map.set(sessionKey, { first: timestamp, last: timestamp, count: 1 })
+      return
+    }
+
+    const entry = map.get(sessionKey)
+    entry.count += 1
+
+    if (timestamp) {
+      if (!entry.first || timestamp < entry.first) {
+        entry.first = timestamp
+      }
+
+      if (!entry.last || timestamp > entry.last) {
+        entry.last = timestamp
+      }
     }
   })
 
   return map
 })
 
+function getSessionRawId(session) {
+  return getFirstString(session, ['id', 'session_id', 'sessionId', 'uuid'])
+}
+
 function getSessionScenarioKey(session) {
-  return normalizeKey(
-    session?.scenario_id ??
-      session?.scenarioId ??
-      session?.scenario?.id ??
-      session?.scenario?.uuid ??
-      session?.scenario_slug ??
-      session?.scenarioSlug ??
-      getSessionScenarioName(session),
-  )
+  return normalizeText(session?.scenario_id ?? session?.scenarioId ?? session?.scenario_slug ?? session?.scenarioSlug ?? session?.scenario?.slug)
 }
 
 function getSessionScenarioName(session) {
-  const directName =
-    getFirstString(session?.scenario, ['title', 'name', 'display_name']) ||
-    getFirstString(session, ['scenario_name', 'scenarioName', 'scenario_title', 'title', 'name'])
-
-  if (directName) {
-    return directName
-  }
-
-  const scenarioKey = normalizeKey(session?.scenario_id ?? session?.scenarioId ?? session?.scenario?.id ?? session?.scenario?.uuid)
+  const scenarioKey = getSessionScenarioKey(session)
 
   return scenarioMap.value.get(scenarioKey) || 'Onbekend scenario'
 }
 
-function getSessionSortStamp(session) {
-  const dateValue =
-    getFirstString(session, ['started_at', 'created_at', 'date', 'updated_at', 'finished_at']) ||
-    session?.started_at ||
-    session?.created_at ||
-    session?.date ||
-    session?.updated_at ||
-    session?.finished_at
+function getSessionTimeline(session) {
+  const sessionKey = normalizeText(getSessionRawId(session))
 
-  const date = toDate(dateValue)
+  if (!sessionKey) {
+    return null
+  }
+
+  return eventTimelines.value.get(sessionKey) || null
+}
+
+function getSessionSortStamp(session) {
+  const date =
+    getFirstDate(session, ['started_at', 'created_at', 'date', 'updated_at', 'finished_at']) ||
+    getSessionTimeline(session)?.first ||
+    getSessionTimeline(session)?.last ||
+    null
 
   return date ? date.getTime() : 0
 }
 
 function getSessionDate(session) {
-  const dateValue =
-    getFirstString(session, ['started_at', 'created_at', 'date', 'updated_at', 'finished_at']) ||
-    session?.started_at ||
-    session?.created_at ||
-    session?.date ||
-    session?.updated_at ||
-    session?.finished_at
-
-  const date = toDate(dateValue)
+  const date =
+    getFirstDate(session, ['started_at', 'created_at', 'date', 'updated_at', 'finished_at']) ||
+    getSessionTimeline(session)?.first ||
+    getSessionTimeline(session)?.last ||
+    null
 
   return date ? dateFormatter.format(date) : 'Onbekend'
 }
@@ -292,30 +390,16 @@ function getSessionDurationMinutes(session) {
     return durationMilliseconds / 60000
   }
 
-  const durationValue = getFirstString(session, ['duration', 'length', 'time_spent'])
-  if (durationValue) {
-    const parsedDuration = Number(durationValue.replace(',', '.').replace(/[^\d.]/g, ''))
-
-    if (!Number.isNaN(parsedDuration)) {
-      if (durationValue.toLowerCase().includes('sec')) {
-        return parsedDuration / 60
-      }
-
-      return parsedDuration
-    }
-  }
-
-  const startedAt = toDate(getFirstString(session, ['started_at', 'created_at', 'date']) || session?.started_at || session?.created_at || session?.date)
-  const finishedAt = toDate(
-    getFirstString(session, ['ended_at', 'finished_at', 'completed_at', 'updated_at']) ||
-      session?.ended_at ||
-      session?.finished_at ||
-      session?.completed_at ||
-      session?.updated_at,
-  )
+  const startedAt = getFirstDate(session, ['started_at', 'created_at', 'date'])
+  const finishedAt = getFirstDate(session, ['ended_at', 'finished_at', 'completed_at', 'updated_at'])
 
   if (startedAt && finishedAt && finishedAt.getTime() >= startedAt.getTime()) {
     return (finishedAt.getTime() - startedAt.getTime()) / 60000
+  }
+
+  const timeline = getSessionTimeline(session)
+  if (timeline?.first && timeline?.last && timeline.last.getTime() >= timeline.first.getTime()) {
+    return (timeline.last.getTime() - timeline.first.getTime()) / 60000
   }
 
   return null
@@ -329,24 +413,52 @@ function formatDuration(minutes) {
   return `${Math.round(minutes)} min`
 }
 
+function formatPercent(value) {
+  if (value === null || Number.isNaN(value)) {
+    return '0%'
+  }
+
+  return `${value}%`
+}
+
+function getSessionStatusKey(session) {
+  const status = normalizeText(getFirstString(session, ['status', 'state', 'session_status']))
+
+  if (!status && session?.ended_at && !session?.stopped_at) {
+    return 'completed'
+  }
+
+  if (['completed', 'voltooid', 'done', 'afgerond', 'finished', 'success'].some((value) => status.includes(value))) {
+    return 'completed'
+  }
+
+  if (['stopped', 'gestopt', 'cancelled', 'canceled', 'aborted', 'failed'].some((value) => status.includes(value))) {
+    return 'stopped'
+  }
+
+  if (['active', 'actief', 'running', 'in progress', 'ongoing', 'open'].some((value) => status.includes(value))) {
+    return 'active'
+  }
+
+  return 'unknown'
+}
+
 function getSessionStatusInfo(session) {
-  const rawStatus = normalizeKey(getFirstString(session, ['status', 'state', 'session_status']))
+  const statusKey = getSessionStatusKey(session)
 
-  if (!rawStatus && session?.ended_at && !session?.stopped_at) {
+  if (statusKey === 'completed') {
     return { label: 'Voltooid', className: 'status-success', icon: '◉' }
   }
 
-  if (['voltooid', 'completed', 'done', 'afgerond', 'finished', 'success'].some((status) => rawStatus.includes(status))) {
-    return { label: 'Voltooid', className: 'status-success', icon: '◉' }
-  }
-
-  if (['gestopt', 'stopped', 'cancelled', 'canceled', 'aborted', 'failed'].some((status) => rawStatus.includes(status))) {
+  if (statusKey === 'stopped') {
     return { label: 'Gestopt', className: 'status-danger', icon: '◉' }
   }
 
-  if (['actief', 'active', 'running', 'in progress', 'ongoing', 'open'].some((status) => rawStatus.includes(status))) {
+  if (statusKey === 'active') {
     return { label: 'Actief', className: 'status-neutral', icon: '◉' }
   }
+
+  const rawStatus = getFirstString(session, ['status', 'state', 'session_status'])
 
   return {
     label: rawStatus ? rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1) : 'Onbekend',
@@ -355,10 +467,17 @@ function getSessionStatusInfo(session) {
   }
 }
 
-function isCompletedSession(session) {
-  const status = normalizeKey(getFirstString(session, ['status', 'state', 'session_status']))
+function getEventSessionKey(event) {
+  return normalizeText(getFirstString(event, ['session_id', 'sessionId', 'session_uuid', 'sessionUuid']))
+}
 
-  return ['voltooid', 'completed', 'done', 'afgerond', 'finished', 'success'].some((value) => status.includes(value))
+function getEventTimestamp(event) {
+  return getFirstDate(event, ['created_at', 'timestamp', 'occurred_at', 'event_at', 'date'])
+}
+
+function shortenId(id) {
+  const text = String(id)
+  return text.length > 8 ? text.slice(0, 8) : text
 }
 
 function isActiveScenario(record) {
@@ -376,7 +495,7 @@ function isActiveScenario(record) {
     return !record.is_archived
   }
 
-  const status = normalizeKey(getFirstString(record, ['status']))
+  const status = normalizeText(getFirstString(record, ['status']))
 
   if (!status) {
     return true
@@ -397,9 +516,11 @@ const recentSessions = computed(() => {
   return [...sessions.value]
     .map((session, index) => {
       const statusInfo = getSessionStatusInfo(session)
+      const rawId = getSessionRawId(session) || `sessie-${index + 1}`
 
       return {
-        key: `${getSessionSortStamp(session)}-${index}-${getSessionScenarioName(session)}`,
+        key: `${rawId}-${index}`,
+        shortId: shortenId(rawId),
         date: getSessionDate(session),
         scenario: getSessionScenarioName(session),
         status: statusInfo.label,
@@ -415,11 +536,19 @@ const recentSessions = computed(() => {
 
 const popularScenarios = computed(() => {
   const counts = new Map()
+  const knownScenarioKeys = new Set(scenarios.value.map((scenario) => normalizeText(scenario?.slug)).filter(Boolean))
+  let unknownCount = 0
 
   sessions.value.forEach((session) => {
-    const key = normalizeKey(session?.scenario_id ?? session?.scenarioId ?? session?.scenario?.id ?? session?.scenario?.uuid)
+    const key = getSessionScenarioKey(session)
 
     if (!key) {
+      unknownCount += 1
+      return
+    }
+
+    if (!knownScenarioKeys.has(key)) {
+      unknownCount += 1
       return
     }
 
@@ -427,8 +556,8 @@ const popularScenarios = computed(() => {
   })
 
   const items = scenarios.value.map((scenario) => {
-    const key = getScenarioKey(scenario)
-    const count = counts.get(key) || counts.get(normalizeKey(getScenarioName(scenario))) || 0
+    const key = normalizeText(scenario?.slug)
+    const count = counts.get(key) || 0
 
     return {
       key,
@@ -447,6 +576,14 @@ const popularScenarios = computed(() => {
     })
   }
 
+  if (unknownCount) {
+    items.push({
+      key: 'unknown-scenario',
+      name: 'Onbekend scenario',
+      sessions: unknownCount,
+    })
+  }
+
   items.sort((left, right) => right.sessions - left.sessions || left.name.localeCompare(right.name, 'nl-NL'))
 
   const maxSessions = items[0]?.sessions || 0
@@ -461,13 +598,13 @@ const kpiCards = computed(() => {
   const totalSessions = sessions.value.length
   const weekStart = getWeekStart(new Date()).getTime()
   const sessionsThisWeek = sessions.value.filter((session) => getSessionSortStamp(session) >= weekStart).length
-  const activeScenarioCount = scenarios.value.filter(isActiveScenario).length
+  const activeScenarioCount = new Set(sessions.value.map((session) => getSessionScenarioKey(session)).filter(Boolean)).size
   const durations = sessions.value
     .map((session) => getSessionDurationMinutes(session))
     .filter((minutes) => minutes !== null && !Number.isNaN(minutes))
   const averageDuration = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null
-  const completedSessions = sessions.value.filter(isCompletedSession).length
-  const completedPercentage = totalSessions ? Math.round((completedSessions / totalSessions) * 100) : null
+  const completedSessions = sessions.value.filter((session) => getSessionStatusKey(session) === 'completed').length
+  const completedPercentage = totalSessions ? Math.round((completedSessions / totalSessions) * 100) : 0
 
   return [
     {
@@ -484,15 +621,34 @@ const kpiCards = computed(() => {
     },
     {
       label: 'Afgeronde sessies',
-      value: completedPercentage === null ? '—' : `${completedPercentage}%`,
+      value: `${completedPercentage}%`,
     },
   ]
 })
+
+function getWeekStart(date) {
+  const weekStart = new Date(date)
+  const day = weekStart.getDay()
+  const diff = weekStart.getDate() - day + (day === 0 ? -6 : 1)
+  weekStart.setDate(diff)
+  weekStart.setHours(0, 0, 0, 0)
+  return weekStart
+}
+
+function isCompletedSession(session) {
+  return getSessionStatusKey(session) === 'completed'
+}
 </script>
 
 <style scoped>
 .dashboard-view {
   padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.dashboard-content {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -568,12 +724,13 @@ const kpiCards = computed(() => {
 }
 
 .card-label,
-.scenario-name,
 .table-footer,
 .insights-placeholder,
 .state-text,
 .sessions-table th,
-.sessions-table td {
+.sessions-table td,
+.scenarios-table th,
+.scenarios-table td {
   font-family: var(--font-family-base);
 }
 
@@ -633,12 +790,83 @@ const kpiCards = computed(() => {
   overflow: hidden;
 }
 
+.scenario-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.scenario-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(140px, 1fr) 72px;
+  align-items: center;
+  padding: 0 0 var(--space-1);
+  color: var(--color-neutral-700);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.scenario-list-head-count {
+  text-align: right;
+}
+
+.scenario-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(140px, 1fr) 72px;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.scenario-name {
+  font-size: var(--text-md);
+  color: var(--color-neutral-800);
+  font-weight: 500;
+  min-width: 0;
+  line-height: 1.3;
+  overflow: hidden;
+  line-clamp: 2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.scenario-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.scenario-track {
+  flex: 1;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-200);
+  overflow: hidden;
+}
+
+.scenario-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-secondary-700), var(--color-secondary-500));
+}
+
+.scenario-count {
+  min-width: 72px;
+  text-align: right;
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-neutral-800);
+  justify-self: end;
+}
+
 .sessions-table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.sessions-table th {
+.sessions-table th,
+.scenarios-table th {
   text-align: left;
   color: var(--color-neutral-700);
   font-size: var(--text-md);
@@ -647,11 +875,17 @@ const kpiCards = computed(() => {
   border-bottom: 1px solid var(--color-border);
 }
 
-.sessions-table td {
+.sessions-table td,
+.scenarios-table td {
   padding: var(--space-4) 0;
   font-size: var(--text-md);
   color: var(--color-neutral-800);
   border-bottom: 1px solid var(--color-border);
+}
+
+.session-id-cell {
+  font-weight: 700;
+  color: var(--color-neutral-900);
 }
 
 .scenario-cell {
@@ -686,54 +920,6 @@ const kpiCards = computed(() => {
   padding-top: var(--space-3);
   color: var(--color-neutral-700);
   font-size: var(--text-md);
-}
-
-.scenario-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.scenario-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.scenario-name {
-  font-size: var(--text-md);
-  color: var(--color-neutral-800);
-}
-
-.scenario-meter {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.scenario-track {
-  flex: 1;
-  height: 8px;
-  border-radius: var(--radius-pill);
-  background: var(--color-neutral-200);
-  overflow: hidden;
-}
-
-.scenario-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-secondary-700), var(--color-secondary-500));
-}
-
-.scenario-count {
-  min-width: 30px;
-  text-align: right;
-  font-size: var(--text-md);
-  font-weight: 700;
-  color: var(--color-neutral-800);
 }
 
 .insights-placeholder {
@@ -797,4 +983,5 @@ const kpiCards = computed(() => {
 .action-button-secondary:hover {
   background: var(--color-secondary-800);
 }
+
 </style>
