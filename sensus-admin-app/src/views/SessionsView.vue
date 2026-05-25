@@ -34,9 +34,9 @@
 
         <label class="select-field">
           <span class="sr-only">Scenario</span>
-          <select v-model="selectedScenario" class="select-input">
-            <option value="all">Scenario</option>
-            <option v-for="opt in scenarioOptions" :key="opt" :value="opt">{{ opt }}</option>
+          <select v-model="selectedScenario" class="select-input scenario-select">
+            <option value="all">Alle scenario’s</option>
+            <option v-for="scenario in scenarioOptions" :key="scenario.slug" :value="scenario.slug">{{ mapScenario(scenario.slug) }}</option>
           </select>
         </label>
 
@@ -153,7 +153,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { supabase } from '@/services/supabase'
 
 const pageSize = 10
@@ -165,86 +165,324 @@ const selectedDate = ref('all')
 const activeTab = ref('all')
 const currentPage = ref(1)
 const sessions = ref([])
+const scenarios = ref([])
+const reflections = ref([])
+const analyticsRows = ref([])
+let sessionsChannel = null
 
 onMounted(() => {
-  void loadSessions()
+  void fetchSessions()
+
+  sessionsChannel = supabase
+    .channel('sessions-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'sessions',
+      },
+      () => {
+        void fetchSessions()
+      }
+    )
+    .subscribe()
 })
 
-async function loadSessions() {
+onUnmounted(() => {
+  if (sessionsChannel) {
+    void supabase.removeChannel(sessionsChannel)
+    sessionsChannel = null
+  }
+})
+
+watch(selectedScenario, () => {
+  if (!selectedScenario.value || selectedScenario.value === 'all') return
+  void loadScenarioDetails()
+})
+
+async function fetchSessions() {
   loading.value = true
   errorMessage.value = ''
 
   try {
     const [{ data: sessionsRaw, error: sessionsError }, { data: scenariosRaw, error: scenariosError }] = await Promise.all([
-      supabase.from('sessions').select('*'),
+      supabase.from('sessions').select('*').order('started_at', { ascending: false }),
       supabase.from('scenarios').select('*'),
     ])
 
     if (sessionsError) throw sessionsError
     if (scenariosError) throw scenariosError
 
-    const scenarioMap = buildScenarioMap(Array.isArray(scenariosRaw) ? scenariosRaw : [])
+    scenarios.value = Array.isArray(scenariosRaw) ? scenariosRaw : []
+
     const rows = Array.isArray(sessionsRaw)
-      ? sessionsRaw.map((record, index) => mapSessionRecord(record, index, scenarioMap))
+      ? sessionsRaw.map((record, index) => mapSessionRecord(record, index))
       : []
 
     sessions.value = rows.sort((left, right) => right.sortStamp - left.sortStamp)
   } catch (error) {
     sessions.value = []
+    scenarios.value = []
+    reflections.value = []
+    analyticsRows.value = []
     errorMessage.value = error?.message || 'Sessies konden niet worden geladen.'
   } finally {
     loading.value = false
   }
 }
 
-function buildScenarioMap(scenarios) {
-  const map = new Map()
+function mapScenario(scenarioId) {
+  const scenario = scenarios.value.find((item) => String(item.slug) === String(scenarioId))
+  return scenario?.title || 'Onbekend scenario'
+}
 
-  for (const scenario of scenarios) {
-    const title = getScenarioTitle(scenario)
-    const idCandidates = [scenario?.id, scenario?.scenario_id, scenario?.uuid, scenario?.slug].filter(Boolean)
+async function loadScenarioDetails() {
+  if (!selectedScenario.value) return
 
-    for (const key of idCandidates) {
-      map.set(String(key), title)
+  try {
+    const [reflectionRows, analyticsData] = await Promise.all([
+      loadReflectionsForScenario(selectedScenario.value),
+      loadScenarioAnalytics(selectedScenario.value),
+    ])
+
+    reflections.value = reflectionRows
+    analyticsRows.value = analyticsData
+  } catch (error) {
+    reflections.value = []
+    analyticsRows.value = []
+    errorMessage.value = error?.message || 'Inzichten konden niet worden geladen.'
+  }
+}
+
+async function loadReflectionsForScenario(scenarioSlug) {
+  const { data, error } = await safeSelectTable('reflections')
+  if (error) throw error
+
+  const rows = Array.isArray(data) ? data : []
+  return rows.filter((record) => recordMatchesScenario(record, scenarioSlug)).map(mapReflection)
+}
+
+async function loadScenarioAnalytics(scenarioSlug) {
+  const { data, error } = await safeSelectTable('scenario_analytics')
+  if (error) throw error
+
+  const rows = Array.isArray(data) ? data : []
+  return rows.filter((record) => recordMatchesScenario(record, scenarioSlug))
+}
+
+async function safeSelectTable(tableName) {
+  const { data, error } = await supabase
+    .from(tableName)
+    .select('*')
+
+  if (error) {
+    const message = String(error.message || '').toLowerCase()
+    if (message.includes('does not exist') || message.includes('could not find')) {
+      return { data: [], error: null }
     }
   }
 
-  return map
+  return { data, error }
 }
 
-function mapSessionRecord(record, index, scenarioMap) {
+function recordMatchesScenario(record, scenarioSlug) {
+  if (!scenarioSlug) return false
+
+  const scenarioId = getFirstString(record, ['scenario_id', 'scenarioId'])
+  if (scenarioId && String(scenarioId) === String(scenarioSlug)) return true
+
+  const slug = getFirstString(record, ['scenario_slug', 'slug'])
+  if (slug && normalizeText(slug) === normalizeText(scenarioSlug)) return true
+
+  return false
+}
+
+function mapReflection(record, index) {
+  const rawDate = getFirstDate(record, ['created_at', 'date', 'reflection_date', 'submitted_at'])
+
+  return {
+    id: getFirstString(record, ['user_id', 'id', 'reflection_id']) || `r-${index + 1}`,
+    date: formatDate(rawDate),
+    age: getFirstNumber(record, ['age', 'user_age']) ?? 'Onbekend',
+    gender: getFirstString(record, ['gender', 'user_gender']) || 'Onbekend',
+    text: getFirstString(record, ['text', 'reflection', 'content', 'message']) || 'Onbekend',
+  }
+}
+
+function extractStepAnalytics(rows) {
+  if (!rows.length) return []
+
+  const nestedRow = rows.find((row) => Array.isArray(row.step_analytics) || Array.isArray(row.steps) || Array.isArray(row.dropoff_steps))
+  if (nestedRow) {
+    const nested = nestedRow.step_analytics || nestedRow.steps || nestedRow.dropoff_steps || []
+
+    return nested
+      .map((item, index) => ({
+        key: `step-analytics-${index}`,
+        title: getFirstString(item, ['title', 'label', 'step']) || `Stap ${index + 1}`,
+        desc: getFirstString(item, ['desc', 'description']) || 'Onbekend',
+        padA: clampPercent(getFirstNumber(item, ['pad_a', 'path_a', 'a', 'padA']) ?? 0),
+        padB: clampPercent(getFirstNumber(item, ['pad_b', 'path_b', 'b', 'padB']) ?? 0),
+        drop: clampPercent(getFirstNumber(item, ['drop', 'dropoff', 'afhaak']) ?? 0),
+      }))
+      .filter((item) => item.title)
+  }
+
+  return rows
+    .map((row, index) => ({
+      key: `step-row-${index}`,
+      title: getFirstString(row, ['title', 'label', 'step']) || `Stap ${index + 1}`,
+      desc: getFirstString(row, ['desc', 'description']) || 'Onbekend',
+      padA: clampPercent(getFirstNumber(row, ['pad_a', 'path_a', 'a', 'padA']) ?? 0),
+      padB: clampPercent(getFirstNumber(row, ['pad_b', 'path_b', 'b', 'padB']) ?? 0),
+      drop: clampPercent(getFirstNumber(row, ['drop', 'dropoff', 'afhaak']) ?? 0),
+    }))
+    .filter((item) => item.title)
+}
+
+function deriveStepsFromSessions(sessionRows) {
+  const groups = new Map()
+
+  for (const session of sessionRows) {
+    const rawStep = getFirstString(session, ['step', 'current_step', 'session_step', 'stage'])
+    const key = rawStep || 'Stap 1'
+
+    if (!groups.has(key)) {
+      groups.set(key, { total: 0, a: 0, b: 0, drop: 0 })
+    }
+
+    const group = groups.get(key)
+    group.total += 1
+
+    const path = normalizePath(session.path)
+    if (path === 'A') group.a += 1
+    if (path === 'B') group.b += 1
+    if (session.statusKey === 'stopped') group.drop += 1
+  }
+
+  const entries = Array.from(groups.entries())
+  entries.sort((left, right) => normalizeStepOrder(left[0]) - normalizeStepOrder(right[0]))
+
+  if (!entries.length) {
+    const total = sessionRows.length || 1
+    const aCount = sessionRows.filter((session) => normalizePath(session.path) === 'A').length
+    const bCount = sessionRows.filter((session) => normalizePath(session.path) === 'B').length
+    const dropCount = sessionRows.filter((session) => session.statusKey === 'stopped').length
+
+    return [
+      {
+        key: 'step-fallback',
+        title: 'Stap 1',
+        desc: 'Onbekend',
+        padA: Math.round((aCount / total) * 100),
+        padB: Math.round((bCount / total) * 100),
+        drop: Math.round((dropCount / total) * 100),
+      },
+    ]
+  }
+
+  return entries.map(([stepKey, value], index) => {
+    const total = value.total || 1
+    return {
+      key: `step-session-${stepKey}-${index}`,
+      title: `Stap ${index + 1}`,
+      desc: String(stepKey),
+      padA: Math.round((value.a / total) * 100),
+      padB: Math.round((value.b / total) * 100),
+      drop: Math.round((value.drop / total) * 100),
+    }
+  })
+}
+
+function calculatePathBreakdown(key, label, sessionRows) {
+  const total = sessionRows.length || 1
+  const aCount = sessionRows.filter((session) => normalizePath(session.path) === 'A').length
+  const bCount = sessionRows.filter((session) => normalizePath(session.path) === 'B').length
+  const dropCount = sessionRows.filter((session) => session.statusKey === 'stopped').length
+
+  return {
+    key,
+    label,
+    padA: Math.round((aCount / total) * 100),
+    padB: Math.round((bCount / total) * 100),
+    drop: Math.round((dropCount / total) * 100),
+  }
+}
+
+function normalizePath(path) {
+  const value = normalizeText(path)
+  if (!value) return ''
+  if (value === 'a' || value.includes('pad a') || value.includes('path a')) return 'A'
+  if (value === 'b' || value.includes('pad b') || value.includes('path b')) return 'B'
+  return ''
+}
+
+function normalizeGender(gender) {
+  const value = normalizeText(gender)
+  if (!value) return 'unknown'
+  return value
+}
+
+function normalizeStepOrder(stepValue) {
+  const number = Number(String(stepValue).replace(/[^0-9]/g, ''))
+  if (!Number.isNaN(number) && number > 0) return number
+  return Number.MAX_SAFE_INTEGER
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function getFirstNumber(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key]
+
+    if (typeof value === 'number' && !Number.isNaN(value)) return value
+
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value.replace(',', '.'))
+      if (!Number.isNaN(parsed)) return parsed
+    }
+  }
+
+  return null
+}
+
+function mapSessionRecord(record, index) {
   const rawId = getFirstString(record, ['id', 'session_id', 'sessionId', 'uuid']) || `sessie-${index + 1}`
   const id = shortenId(rawId)
 
-  const startDate = getFirstDate(record, ['started_at', 'start_at', 'start_time', 'created_at'])
-  const endDate = getFirstDate(record, ['ended_at', 'end_at', 'end_time', 'updated_at'])
-  const displayDate = startDate || endDate || getFirstDate(record, ['created_at'])
+  const startDate = getFirstDate(record, ['started_at'])
+  const endDate = getFirstDate(record, ['ended_at'])
+  const displayDate = startDate || getFirstDate(record, ['created_at']) || endDate 
 
-  const rawStatus = getFirstString(record, ['status', 'state'])
-  const normalizedStatus = normalizeStatus(rawStatus)
+  const normalizedStatus = normalizeStatus(record)
   const isOffline = getOfflineState(record)
 
-  const scenarioId = getFirstString(record, ['scenario_id', 'scenarioId'])
-  const scenarioFromSession = getFirstString(record, ['scenario_title', 'scenario', 'title'])
-  const scenario = scenarioFromSession || (scenarioId ? scenarioMap.get(String(scenarioId)) : '') || 'Onbekend scenario'
+  const scenarioId = getFirstString(record, ['scenario_id'])
+  const scenario = scenarioId ? mapScenario(scenarioId) : 'Onbekend scenario'
 
   return {
     id,
     scenario,
+    scenarioSlug: scenarioId || '',
+    age: getFirstNumber(record, ['age']) ?? null,
+    gender: normalizeGender(getFirstString(record, ['gender'])),
     date: formatDate(displayDate),
     start: formatTime(startDate),
     end: formatTime(endDate),
     status: normalizedStatus,
     statusKey: statusKeyFromLabel(normalizedStatus),
     isOffline,
-    durationMinutes: calculateDurationMinutes(startDate, endDate),
+    durationMinutes: getDurationMinutes(record, startDate, endDate),
     sessionDate: displayDate,
     sortStamp: displayDate?.getTime?.() || 0,
   }
 }
 
 function getScenarioTitle(scenario) {
-  return getFirstString(scenario, ['title', 'name', 'display_name', 'slug']) || 'Onbekend scenario'
+  return getFirstString(scenario, ['title']) || 'Onbekend scenario'
 }
 
 function getFirstString(source, keys) {
@@ -274,13 +512,36 @@ function shortenId(id) {
   return text.length > 8 ? text.slice(0, 8) : text
 }
 
-function normalizeStatus(status) {
-  const normalized = String(status || '').trim().toLowerCase()
+function normalizeStatus(record) {
+  const completed = getFirstBoolean(record, ['completed'])
+  const normalized = String(getFirstString(record, ['status', 'state']) || '').trim().toLowerCase()
+  const stoppedReason = getFirstString(record, ['stopped_reason'])
 
-  if (normalized === 'completed' || normalized === 'voltooid') return 'Voltooid'
-  if (normalized === 'stopped' || normalized === 'gestopt') return 'Gestopt'
+  if (completed || normalized === 'completed' || normalized === 'voltooid') return 'Voltooid'
   if (normalized === 'active' || normalized === 'actief') return 'Actief'
+  if (normalized === 'stopped' || normalized === 'gestopt' || stoppedReason) return 'Gestopt'
   return 'Onbekend'
+}
+
+function getFirstBoolean(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key]
+
+    if (typeof value === 'boolean') return value
+
+    if (typeof value === 'number') {
+      if (value === 1) return true
+      if (value === 0) return false
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      const normalized = value.trim().toLowerCase()
+      if (['true', '1', 'yes', 'y'].includes(normalized)) return true
+      if (['false', '0', 'no', 'n'].includes(normalized)) return false
+    }
+  }
+
+  return false
 }
 
 function statusKeyFromLabel(label) {
@@ -327,6 +588,16 @@ function calculateDurationMinutes(startDate, endDate) {
   return Math.round(diffMs / 60000)
 }
 
+function getDurationMinutes(record, startDate, endDate) {
+  const durationSeconds = getFirstNumber(record, ['duration_seconds'])
+
+  if (typeof durationSeconds === 'number' && durationSeconds >= 0) {
+    return Math.round(durationSeconds / 60)
+  }
+
+  return calculateDurationMinutes(startDate, endDate) || 0
+}
+
 function isSameCalendarDay(left, right) {
   return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate()
 }
@@ -344,9 +615,9 @@ function isInCurrentWeek(date) {
 }
 
 const tabs = computed(() => {
-  const all = sessions.value.length
-  const active = sessions.value.filter((s) => s.statusKey === 'active').length
-  const completed = sessions.value.filter((s) => s.statusKey === 'completed').length
+  const all = scenarioSessions.value.length
+  const active = scenarioSessions.value.filter((s) => s.statusKey === 'active').length
+  const completed = scenarioSessions.value.filter((s) => s.statusKey === 'completed').length
 
   return [
     { key: 'all', label: `Alle sessies (${all})` },
@@ -355,10 +626,17 @@ const tabs = computed(() => {
   ]
 })
 
-const scenarioOptions = computed(() => [...new Set(sessions.value.map((s) => s.scenario))])
+const scenarioOptions = computed(() => scenarios.value)
+
+const scenarioSessions = computed(() => {
+  if (selectedScenario.value === 'all') return sessions.value
+  if (!selectedScenario.value) return []
+
+  return sessions.value.filter((session) => session.scenarioSlug === selectedScenario.value)
+})
 
 const filteredSessionsAll = computed(() => {
-  let items = [...sessions.value]
+  let items = [...scenarioSessions.value]
 
   if (activeTab.value === 'active') {
     items = items.filter((s) => s.statusKey === 'active')
@@ -371,10 +649,6 @@ const filteredSessionsAll = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   if (q) {
     items = items.filter((s) => `${s.id} ${s.scenario}`.toLowerCase().includes(q))
-  }
-
-  if (selectedScenario.value !== 'all') {
-    items = items.filter((s) => s.scenario === selectedScenario.value)
   }
 
   if (selectedDate.value === 'today') {
@@ -429,12 +703,11 @@ watch(filteredSessionsAll, () => {
 })
 
 const kpi = computed(() => {
-  const all = sessions.value
+  const all = scenarioSessions.value
   const total = all.length
 
   const completedCount = all.filter((s) => s.statusKey === 'completed').length
   const stoppedCount = all.filter((s) => s.statusKey === 'stopped').length
-  const offlineCount = all.filter((s) => s.isOffline).length
   const thisWeekCount = all.filter((s) => s.sessionDate && isInCurrentWeek(s.sessionDate)).length
 
   const durationSource = all
@@ -450,8 +723,77 @@ const kpi = computed(() => {
     completedPct: total ? Math.round((completedCount / total) * 100) : 0,
     avgDuration,
     dropoffPct: total ? Math.round((stoppedCount / total) * 100) : 0,
-    offlinePct: total ? Math.round((offlineCount / total) * 100) : 0,
+    offlinePct: 0,
   }
+})
+
+const warningText = computed(() => {
+  if (!scenarioSessions.value.length) {
+    return 'Geen sessiedata beschikbaar voor dit scenario'
+  }
+
+  return `Afhaak ligt op ${kpi.value.dropoffPct}% voor dit scenario`
+})
+
+const behaviorSummary = computed(() => {
+  const pathCounts = scenarioSessions.value.reduce((acc, session) => {
+    const pathKey = normalizePath(session.path)
+    if (pathKey === 'A') acc.a += 1
+    if (pathKey === 'B') acc.b += 1
+    return acc
+  }, { a: 0, b: 0 })
+
+  const total = pathCounts.a + pathCounts.b
+  const aPct = total ? Math.round((pathCounts.a / total) * 100) : 0
+  const bPct = total ? Math.round((pathCounts.b / total) * 100) : 0
+
+  const mostPopularPath = bPct >= aPct ? 'B' : 'A'
+  const leastPopularPath = bPct >= aPct ? 'A' : 'B'
+  const mostPopularPct = Math.max(aPct, bPct)
+  const leastPopularPct = Math.min(aPct, bPct)
+
+  return {
+    mostPopularPath,
+    leastPopularPath,
+    mostPopularPct,
+    leastPopularPct,
+    note: total
+      ? `${mostPopularPct}% kiest pad ${mostPopularPath} in dit scenario`
+      : 'Nog geen padgegevens beschikbaar',
+  }
+})
+
+const genders = computed(() => {
+  const defaults = [
+    { key: 'men', label: 'Mannen', matcher: ['m', 'man', 'male', 'mannen'] },
+    { key: 'women', label: 'Vrouwen', matcher: ['v', 'vrouw', 'female', 'vrouwen'] },
+    { key: 'nonbinary', label: 'Non-binair', matcher: ['non-binary', 'nonbinary', 'nb'] },
+    { key: 'prefer', label: 'Wil ik liever niet zeggen', matcher: [] },
+  ]
+
+  return defaults.map((group) => {
+    const groupSessions = scenarioSessions.value.filter((session) => {
+      if (group.key === 'prefer') {
+        return !session.gender || session.gender === 'unknown'
+      }
+
+      return group.matcher.includes(session.gender)
+    })
+
+    return calculatePathBreakdown(group.key, group.label, groupSessions)
+  })
+})
+
+const steps = computed(() => {
+  const analyticSteps = extractStepAnalytics(analyticsRows.value)
+  if (analyticSteps.length) return analyticSteps
+
+  const sessionSteps = deriveStepsFromSessions(scenarioSessions.value)
+  if (sessionSteps.length) return sessionSteps
+
+  return [
+    { key: 'step-1', title: 'Stap 1', desc: 'Onbekend', padA: 0, padB: 0, drop: 0 },
+  ]
 })
 </script>
 
@@ -532,10 +874,15 @@ const kpi = computed(() => {
 }
 
 .filters-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px 150px;
-  gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin-bottom: 0;
+}
+
+.search-field {
+  flex: 1;
+  min-width: 220px;
 }
 
 .search-field,
@@ -543,6 +890,10 @@ const kpi = computed(() => {
   position: relative;
   display: flex;
   align-items: center;
+}
+
+.select-field {
+  flex: 0 0 auto;
 }
 
 .search-icon {
@@ -556,7 +907,6 @@ const kpi = computed(() => {
 
 .search-input,
 .select-input {
-  width: 100%;
   border: 1px solid var(--color-border);
   border-radius: 14px;
   background: var(--color-surface);
@@ -569,16 +919,31 @@ const kpi = computed(() => {
 }
 
 .search-input {
+  width: 100%;
   padding: 14px 16px 14px 42px;
 }
 
 .select-input {
+  width: fit-content;
   padding: 14px 40px 14px 14px;
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--color-neutral-700) 50%), linear-gradient(135deg, var(--color-neutral-700) 50%, transparent 50%);
   background-position: calc(100% - 20px) 20px, calc(100% - 14px) 20px;
   background-size: 6px 6px, 6px 6px;
   background-repeat: no-repeat;
+  white-space: nowrap;
+}
+
+.scenario-select {
+  min-width: 180px;
+  width: fit-content;
+  max-width: 260px;
+}
+
+.select-field:last-child .select-input {
+  width: 140px;
+  min-width: 140px;
+  max-width: 140px;
 }
 
 .table-wrap {
