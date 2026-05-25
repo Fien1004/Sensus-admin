@@ -876,7 +876,6 @@ const steps = computed(() => {
 .filters-row {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
   gap: 16px;
   margin-bottom: 0;
 }
@@ -939,11 +938,6 @@ const steps = computed(() => {
   min-width: 180px;
   width: fit-content;
   max-width: 260px;
-  overflow: visible;
-}
-
-.select-field:last-child {
-  flex: 0 0 140px;
 }
 
 .select-field:last-child .select-input {
