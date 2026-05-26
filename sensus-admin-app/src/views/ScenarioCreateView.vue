@@ -14,8 +14,33 @@
 
     <section class="flow-nav-row" aria-label="Scenario flow navigatie">
       <nav class="flow-nav-scroll" aria-label="Stappen" role="tablist">
-        <template v-for="(step, index) in flowSteps" :key="step.id">
+        <template v-for="step in flowSteps" :key="step.id">
+          <div v-if="step.type === 'question'" class="flow-tab-group">
+            <button
+              type="button"
+              class="flow-tab"
+              :class="{ active: selectedStepKey === step.id }"
+              role="tab"
+              :aria-selected="selectedStepKey === step.id"
+              @click="selectStep(step.id)"
+            >
+              {{ step.label }}
+            </button>
+
+            <button
+              v-if="step.canDelete"
+              type="button"
+              class="flow-tab-delete"
+              aria-label="Verwijder vraag"
+              title="Verwijder vraag"
+              @click.stop="removeQuestionStep(step.id)"
+            >
+              ×
+            </button>
+          </div>
+
           <button
+            v-else
             type="button"
             class="flow-tab"
             :class="{ active: selectedStepKey === step.id }"
@@ -33,6 +58,10 @@
 
     <section class="editor-shell">
       <section class="editor-panel card">
+        <div v-if="saveError" class="save-error" role="alert">
+          {{ saveError }}
+        </div>
+
         <div v-if="selectedStepKey === 'intro'" class="form-block">
           <h2 class="section-title">Basisinfo</h2>
 
@@ -86,27 +115,52 @@
         <div v-else-if="currentStep?.type === 'question'" class="form-block">
           <h2 class="section-title">Vraag {{ currentStepIndex + 1 }}</h2>
 
-          <div class="field-grid">
-            <label class="field">
-              <span class="field-label">Vraag titel</span>
-              <input v-model="currentStep.title" type="text" class="field-input" placeholder="Titel" />
-            </label>
+          <label class="field field-wide">
+            <span class="field-label">Titel</span>
+            <input v-model="currentQuestion.title" type="text" class="field-input" placeholder="Titel" />
+          </label>
 
-            <label class="field">
-              <span class="field-label">Korte beschrijving</span>
-              <input v-model="currentStep.description" type="text" class="field-input" placeholder="Beschrijving" />
-            </label>
-          </div>
+          <label class="field field-wide">
+            <span class="field-label">Layout</span>
+            <select v-model="currentQuestion.layout" class="field-input">
+              <option value="chat">Chat</option>
+              <option value="narrative">Narrative</option>
+            </select>
+          </label>
 
           <label class="field field-wide">
             <span class="field-label">Vraag</span>
-            <textarea v-model="currentStep.question" class="field-textarea" placeholder="Stel je vraag"></textarea>
+            <input v-model="currentQuestion.question" type="text" class="field-input" placeholder="Schrijf hier iets" />
           </label>
 
-          <div class="options-grid">
-            <label v-for="(option, optionIndex) in currentStep.options" :key="optionIndex" class="field">
-              <span class="field-label">Optie {{ optionIndex + 1 }}</span>
-              <input v-model="option.label" type="text" class="field-input" placeholder="Antwoordoptie" />
+          <div class="question-options">
+            <div v-for="(option, optionIndex) in currentQuestion.options" :key="optionIndex" class="question-option-row">
+              <label class="question-option-label">Keuze {{ optionIndex + 1 }}</label>
+
+              <input
+                v-model="option.label"
+                type="text"
+                class="question-option-input"
+                placeholder="Schrijf hier iets"
+              />
+
+              <span class="question-option-arrow" aria-hidden="true">&gt;</span>
+
+              <select v-model="option.next" class="question-option-select">
+                <option disabled value="">Selectie</option>
+                <option v-for="step in nextStepOptions" :key="step.value" :value="step.value">
+                  {{ step.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="question-actions">
+            <button type="button" class="question-add-choice" @click="addQuestionOption">+ Keuze toevoegen</button>
+
+            <label class="question-custom-input-toggle">
+              <input v-model="currentQuestion.allowCustomInput" type="checkbox" />
+              <span>Eigen input</span>
             </label>
           </div>
         </div>
@@ -162,13 +216,31 @@
           </template>
 
           <template v-else-if="currentStep?.type === 'question'">
-            <p class="preview-heading">{{ currentStep.title || 'Vraag' }}</p>
-            <p class="preview-text">{{ currentStep.description || 'Beschrijving' }}</p>
-            <p class="preview-body">{{ currentStep.question || 'Vraagtekst' }}</p>
-            <div class="preview-options">
-              <div v-for="(option, optionIndex) in currentStep.options" :key="optionIndex" class="preview-option">
-                <span>{{ option.label || `Optie ${optionIndex + 1}` }}</span>
-                <span class="preview-option-next">{{ option.next }}</span>
+            <div v-if="currentQuestion.layout === 'chat'" class="question-preview question-preview--chat">
+              <p class="preview-heading">{{ currentQuestion.title || 'Vraag 1' }}</p>
+              <p class="preview-text">{{ currentQuestion.description || currentQuestion.question || 'Beschrijving' }}</p>
+              <p class="preview-body">{{ currentQuestion.question || 'Vraagtekst' }}</p>
+              <p v-if="currentQuestion.allowCustomInput" class="preview-note">Eigen input toegestaan</p>
+              <div class="preview-options">
+                <button v-for="(option, optionIndex) in currentQuestion.options" :key="optionIndex" type="button" class="preview-option">
+                  <span>{{ option.label || `Keuze ${optionIndex + 1}` }}</span>
+                </button>
+                <button v-if="currentQuestion.allowCustomInput" type="button" class="preview-option preview-option-custom">
+                  <span>Eigen input</span>
+                </button>
+              </div>
+            </div>
+
+            <div v-else class="question-preview question-preview--narrative">
+              <p class="preview-heading">{{ currentQuestion.title || 'Vraag 1' }}</p>
+              <p class="preview-body">{{ currentQuestion.description || currentQuestion.question || 'Vraagtekst' }}</p>
+              <div class="preview-options">
+                <button v-for="(option, optionIndex) in currentQuestion.options" :key="optionIndex" type="button" class="preview-option">
+                  <span>{{ option.label || `Keuze ${optionIndex + 1}` }}</span>
+                </button>
+                <button v-if="currentQuestion.allowCustomInput" type="button" class="preview-option preview-option-custom">
+                  <span>Eigen input</span>
+                </button>
               </div>
             </div>
           </template>
@@ -190,20 +262,157 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScenarioEditorState } from '@/composables/useScenarioEditorState'
 
 const router = useRouter()
 
-const { scenario, selectedStepKey, currentStep, currentStepIndex, editorSteps, addStep, handleSave } = useScenarioEditorState()
+const { scenario, selectedStepKey, currentStep, currentStepIndex, editorSteps, addStep, removeQuestionStep } = useScenarioEditorState()
+
+const saveError = ref('')
+
+const currentQuestion = computed(() => currentStep.value || { layout: 'chat', options: [] })
 
 const flowSteps = computed(() => [
-  { id: 'intro', label: 'Intro' },
-  ...editorSteps.value.map((step) => ({ id: step.id, label: step.label })),
-  { id: 'reflection', label: 'Reflectie' },
-  { id: 'ending', label: 'Afsluiting' },
+  { id: 'intro', label: 'Intro', type: 'static' },
+  ...editorSteps.value.map((step, index) => ({
+    id: step.id,
+    label: step.label,
+    type: 'question',
+    canDelete: index > 0,
+  })),
+  { id: 'reflection', label: 'Reflectie', type: 'static' },
+  { id: 'ending', label: 'Afsluiting', type: 'static' },
 ])
+
+const nextStepOptions = computed(() => [
+  { value: 'reflection', label: 'Reflectie' },
+  { value: 'ending', label: 'Afsluiting' },
+  ...editorSteps.value.map((step) => ({ value: step.id, label: step.label })),
+])
+
+function calculateQuestionProgress(index, totalQuestions) {
+  const totalSteps = totalQuestions + 2
+  return Math.round(((index + 1) / totalSteps) * 100)
+}
+
+function getDefaultNextStep(questionIndex, questionCount) {
+  return questionIndex < questionCount - 1 ? scenario.questionSteps[questionIndex + 1].id : 'reflectie'
+}
+
+function normalizeNextStep(nextStep, fallbackStep) {
+  if (!nextStep) return fallbackStep
+
+  if (nextStep === 'reflection') return 'reflectie'
+  if (nextStep === 'ending') return 'end'
+
+  return nextStep
+}
+
+function buildQuestionStep(question, index, questionCount) {
+  const defaultNextStep = getDefaultNextStep(index, questionCount)
+  const options = question.options
+    .filter((option) => option.label.trim())
+    .map((option) => ({
+      label: option.label.trim(),
+      next: normalizeNextStep(option.next, defaultNextStep),
+    }))
+
+  const description = question.description.trim() || question.question.trim()
+
+  return {
+    id: question.id,
+    type: 'question',
+    layout: question.layout,
+    title: question.title,
+    description,
+    question: question.question,
+    inputType: 'choice',
+    allowCustomInput: question.allowCustomInput,
+    options,
+    progress: calculateQuestionProgress(index, questionCount),
+  }
+}
+
+function validateEditorState() {
+  const errors = []
+
+  if (!scenario.title.trim()) errors.push('Scenario naam is verplicht.')
+  if (!scenario.description.trim()) errors.push('Scenario beschrijving is verplicht.')
+  if (!scenario.theme.trim()) errors.push('Thema is verplicht.')
+  if (!scenario.intro.title.trim()) errors.push('Intro titel is verplicht.')
+  if (scenario.questionSteps.length < 1) errors.push('Minstens 1 vraag is verplicht.')
+
+  scenario.questionSteps.forEach((question, index) => {
+    const questionNumber = index + 1
+    const filledOptions = question.options.filter((option) => option.label.trim())
+
+    if (!question.title.trim()) {
+      errors.push(`Vraag ${questionNumber}: titel is verplicht.`)
+    }
+
+    if (!question.question.trim()) {
+      errors.push(`Vraag ${questionNumber}: vraag is verplicht.`)
+    }
+
+    if (!question.layout) {
+      errors.push(`Vraag ${questionNumber}: layout is verplicht.`)
+    }
+
+    if (filledOptions.length < 2) {
+      errors.push(`Vraag ${questionNumber} moet minstens 2 ingevulde opties hebben.`)
+    }
+
+    if (question.options.some((option) => option.next === question.id)) {
+      errors.push('Een keuze mag niet naar dezelfde stap verwijzen.')
+    }
+  })
+
+  if (!scenario.reflection.title.trim()) errors.push('Reflectie titel is verplicht.')
+  if (!scenario.reflection.question.trim()) errors.push('Reflectie vraag is verplicht.')
+  if (!scenario.ending.title.trim()) errors.push('Afsluit titel is verplicht.')
+
+  return errors
+}
+
+function buildScenarioPayload() {
+  const questionCount = scenario.questionSteps.length
+
+  const steps = scenario.questionSteps.map((question, index) => buildQuestionStep(question, index, questionCount))
+
+  steps.push({
+    id: 'reflectie',
+    type: 'reflection',
+    title: scenario.reflection.title,
+    description: scenario.reflection.body,
+    question: scenario.reflection.question,
+    progress: calculateQuestionProgress(questionCount, questionCount),
+  })
+
+  steps.push({
+    id: 'end',
+    type: 'ending',
+    title: scenario.ending.title,
+    description: scenario.ending.body,
+    progress: 100,
+  })
+
+  return {
+    title: scenario.title,
+    description: scenario.description,
+    theme: scenario.theme,
+    duration: scenario.duration,
+    intro: {
+      title: scenario.intro.title,
+      description: scenario.description,
+      body: scenario.intro.body,
+      button: scenario.intro.button,
+      note: scenario.intro.note,
+    },
+    steps,
+  }
+}
 
 function selectStep(stepId) {
   selectedStepKey.value = stepId
@@ -211,6 +420,25 @@ function selectStep(stepId) {
 
 function handleAddStep() {
   addStep()
+}
+
+function addQuestionOption() {
+  if (!currentStep.value) return
+
+  currentStep.value.options.push({ label: '', next: '' })
+}
+
+function handleSave() {
+  const errors = validateEditorState()
+
+  if (errors.length > 0) {
+    saveError.value = errors.join(' ')
+    return
+  }
+
+  saveError.value = ''
+  const payload = buildScenarioPayload()
+  console.log(JSON.stringify(payload, null, 2))
 }
 
 function handleCancel() {
@@ -278,6 +506,27 @@ function handleCancel() {
   -webkit-overflow-scrolling: touch;
 }
 
+.flow-tab-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  flex: 0 0 auto;
+  position: relative;
+  transition: padding-right 0.15s ease;
+}
+
+.flow-tab-group:hover,
+.flow-tab-group:focus-within {
+  padding-right: 16px;
+}
+
+.flow-tab-group:hover .flow-tab-delete,
+.flow-tab-group:focus-within .flow-tab-delete {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
 .flow-tab {
   flex: 0 0 auto;
   border: none;
@@ -291,6 +540,32 @@ function handleCancel() {
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.flow-tab-delete {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #9ca3af;
+  font-family: var(--font-family-base);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, color 0.15s ease, visibility 0.15s ease;
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.flow-tab-delete:hover {
+  color: #1f252d;
 }
 
 .flow-tab.active {
@@ -351,6 +626,17 @@ function handleCancel() {
   padding: 22px;
 }
 
+.save-error {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .form-block {
   display: flex;
   flex-direction: column;
@@ -371,6 +657,90 @@ function handleCancel() {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.question-option-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto 140px;
+  gap: 12px;
+  align-items: center;
+}
+
+.question-option-label {
+  font-size: 16px;
+  color: #374151;
+}
+
+.question-option-input,
+.question-option-select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: var(--color-surface);
+  padding: 12px 14px;
+  font-family: var(--font-family-base);
+  font-size: 16px;
+  color: var(--color-neutral-900);
+  outline: none;
+}
+
+.question-option-select {
+  min-width: 0;
+}
+
+.question-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.question-preview--narrative .preview-text {
+  display: none;
+}
+
+.question-option-arrow {
+  color: #6b7280;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.question-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.question-add-choice {
+  border: none;
+  border-radius: 14px;
+  padding: 14px 18px;
+  background: #0d5778;
+  color: var(--color-surface);
+  font-family: var(--font-family-base);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.question-custom-input-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  color: #374151;
+}
+
+.question-custom-input-toggle input {
+  width: 18px;
+  height: 18px;
 }
 
 .field-wide {
@@ -456,20 +826,22 @@ function handleCancel() {
 }
 
 .preview-option {
+  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 12px;
+  background: #ffffff;
   padding: 12px 14px;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   color: #111827;
   font-size: 16px;
+  font-family: var(--font-family-base);
 }
 
-.preview-option-next {
-  color: #6b7280;
-  font-size: 13px;
+.preview-option-custom {
+  background: #f9fafb;
 }
 
 @media (max-width: 1100px) {

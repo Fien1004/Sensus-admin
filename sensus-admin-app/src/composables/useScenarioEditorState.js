@@ -17,12 +17,14 @@ const scenario = reactive({
     {
       id: 'step-1',
       type: 'question',
+      layout: 'chat',
       title: '',
       description: '',
       question: '',
+      allowCustomInput: false,
       options: [
-        { label: '', next: 'reflectie' },
-        { label: '', next: 'reflectie' },
+        { label: '', next: '' },
+        { label: '', next: '' },
       ],
     },
   ],
@@ -73,12 +75,14 @@ export function useScenarioEditorState() {
     const newStep = {
       id: `step-${nextIndex}`,
       type: 'question',
+      layout: 'chat',
       title: '',
       description: '',
       question: '',
+      allowCustomInput: false,
       options: [
-        { label: '', next: 'reflectie' },
-        { label: '', next: 'reflectie' },
+        { label: '', next: '' },
+        { label: '', next: '' },
       ],
     }
 
@@ -86,8 +90,21 @@ export function useScenarioEditorState() {
     selectedStepKey.value = newStep.id
   }
 
-  function handleSave() {
-    console.log(JSON.stringify(scenario, null, 2))
+  function removeQuestionStep(stepId) {
+    if (scenario.questionSteps.length <= 1) return
+
+    const stepIndex = scenario.questionSteps.findIndex((step) => step.id === stepId)
+
+    if (stepIndex <= 0) return
+
+    const wasActive = selectedStepKey.value === stepId
+    const fallbackStep = scenario.questionSteps[stepIndex - 1] || scenario.questionSteps[0]
+
+    scenario.questionSteps.splice(stepIndex, 1)
+
+    if (wasActive) {
+      selectedStepKey.value = fallbackStep.id
+    }
   }
 
   return {
@@ -98,6 +115,6 @@ export function useScenarioEditorState() {
     currentStepIndex,
     editorSteps,
     addStep,
-    handleSave,
+    removeQuestionStep,
   }
 }
