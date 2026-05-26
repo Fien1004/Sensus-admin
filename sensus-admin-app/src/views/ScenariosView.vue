@@ -18,7 +18,7 @@
         </nav>
       </div>
 
-      <button type="button" class="primary-button">+ Nieuw scenario</button>
+      <button type="button" class="primary-button" @click="goToCreateScenario">+ Nieuw scenario</button>
     </header>
 
     <section class="card overview-card">
@@ -115,6 +115,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
 
 const loading = ref(true)
@@ -124,6 +125,7 @@ const selectedTheme = ref('all')
 const selectedStatus = ref('all')
 const activeTab = ref('all')
 const scenarioItems = ref([])
+const router = useRouter()
 
 const dateFormatter = new Intl.DateTimeFormat('nl-NL', {
   day: 'numeric',
@@ -134,6 +136,10 @@ const dateFormatter = new Intl.DateTimeFormat('nl-NL', {
 onMounted(() => {
   void loadScenarios()
 })
+
+function goToCreateScenario() {
+  router.push('/scenarios/new')
+}
 
 async function loadScenarios() {
   loading.value = true

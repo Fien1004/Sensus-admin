@@ -59,7 +59,7 @@ const icons = {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-5); /* 24px */
+  gap: var(--space-5);
   padding-top: var(--space-5);
   padding-bottom: var(--space-5);
 }
@@ -106,7 +106,7 @@ const icons = {
 }
 
 .nav-item:hover {
-  background: rgba(0,0,0,0.03);
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .router-link-exact-active {
@@ -117,5 +117,4 @@ const icons = {
 .router-link-exact-active .icon {
   filter: brightness(0) invert(1);
 }
-
 </style>
