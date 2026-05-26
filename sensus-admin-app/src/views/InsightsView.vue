@@ -206,6 +206,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { supabase } from '@/services/supabase'
+import { formatDuration } from '@/utils/formatDuration'
 
 const tabs = [
   { key: 'all', label: 'Alle sessies' },
@@ -256,8 +257,8 @@ const kpi = computed(() => {
   const completed = filteredSessions.value.filter((session) => session.statusKey === 'completed').length
   const dropped = filteredSessions.value.filter((session) => session.statusKey === 'stopped').length
   const durationValues = filteredSessions.value
-    .map((session) => session.durationMinutes)
-    .filter((value) => typeof value === 'number' && value > 0)
+    .map((session) => session.durationMs)
+    .filter((value) => typeof value === 'number' && value >= 0)
 
   const avgDuration = durationValues.length
     ? Math.round(durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length)
@@ -268,7 +269,7 @@ const kpi = computed(() => {
     completedPct: total ? Math.round((completed / total) * 100) : 0,
     dropoffPct: total ? Math.round((dropped / total) * 100) : 0,
     avgDuration,
-    avgDurationLabel: `${avgDuration} min`,
+    avgDurationLabel: formatDuration(avgDuration),
   }
 })
 
@@ -543,7 +544,8 @@ function mapSession(record, index) {
     path,
     gender,
     dateObj,
-    durationMinutes: getDurationFromRecord(record, startDate, endDate),
+    durationMs: getDurationFromRecord(record, startDate, endDate),
+    durationMinutes: getDurationFromRecord(record, startDate, endDate) / 60000,
     step: getFirstString(record, ['step', 'current_step', 'session_step', 'stage']),
     date: formatDate(dateObj),
     sortStamp: dateObj?.getTime?.() || 0,
@@ -679,12 +681,12 @@ function normalizeText(value) {
 }
 
 function getDurationFromRecord(record, startDate, endDate) {
-  const directMinutes = getFirstNumber(record, ['duration_minutes', 'duration', 'session_duration'])
-  if (typeof directMinutes === 'number' && directMinutes > 0) return directMinutes
+  const directDurationMs = getFirstNumber(record, ['duration_seconds', 'duration', 'session_duration'])
+  if (typeof directDurationMs === 'number' && directDurationMs > 0) return directDurationMs
 
   if (startDate && endDate) {
     const diff = endDate.getTime() - startDate.getTime()
-    if (diff > 0) return Math.round(diff / 60000)
+    if (diff > 0) return diff
   }
 
   return 0

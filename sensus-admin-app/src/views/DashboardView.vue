@@ -113,6 +113,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { supabase } from '@/services/supabase'
+import { formatDuration } from '@/utils/formatDuration'
 
 const loading = ref(true)
 const errorMessage = ref('')
@@ -373,6 +374,29 @@ function getSessionDate(session) {
   return date ? dateFormatter.format(date) : 'Onbekend'
 }
 
+function getSessionDurationMs(session) {
+  const directDuration = getFirstNumber(session, ['duration_seconds', 'durationSeconds', 'duration_sec', 'durationSec', 'duration_ms', 'durationMs'])
+
+  if (directDuration !== null) {
+    return directDuration
+  }
+
+  const startedAt = getFirstDate(session, ['started_at', 'created_at', 'date'])
+  const finishedAt = getFirstDate(session, ['ended_at', 'finished_at', 'completed_at', 'updated_at'])
+
+  if (startedAt && finishedAt && finishedAt.getTime() >= startedAt.getTime()) {
+    return finishedAt.getTime() - startedAt.getTime()
+  }
+
+  const timeline = getSessionTimeline(session)
+
+  if (timeline?.first && timeline?.last && timeline.last.getTime() >= timeline.first.getTime()) {
+    return timeline.last.getTime() - timeline.first.getTime()
+  }
+
+  return 0
+}
+
 function getSessionDurationMinutes(session) {
   const directMinutes = getFirstNumber(session, ['duration_minutes', 'durationMinutes', 'duration_mins', 'duration_min', 'length_minutes'])
 
@@ -380,37 +404,8 @@ function getSessionDurationMinutes(session) {
     return directMinutes
   }
 
-  const durationSeconds = getFirstNumber(session, ['duration_seconds', 'durationSeconds', 'duration_sec', 'durationSec'])
-  if (durationSeconds !== null) {
-    return durationSeconds / 60
-  }
-
-  const durationMilliseconds = getFirstNumber(session, ['duration_ms', 'durationMs'])
-  if (durationMilliseconds !== null) {
-    return durationMilliseconds / 60000
-  }
-
-  const startedAt = getFirstDate(session, ['started_at', 'created_at', 'date'])
-  const finishedAt = getFirstDate(session, ['ended_at', 'finished_at', 'completed_at', 'updated_at'])
-
-  if (startedAt && finishedAt && finishedAt.getTime() >= startedAt.getTime()) {
-    return (finishedAt.getTime() - startedAt.getTime()) / 60000
-  }
-
-  const timeline = getSessionTimeline(session)
-  if (timeline?.first && timeline?.last && timeline.last.getTime() >= timeline.first.getTime()) {
-    return (timeline.last.getTime() - timeline.first.getTime()) / 60000
-  }
-
-  return null
-}
-
-function formatDuration(minutes) {
-  if (minutes === null || Number.isNaN(minutes)) {
-    return '—'
-  }
-
-  return `${Math.round(minutes)} min`
+  const durationMs = getSessionDurationMs(session)
+  return durationMs !== null ? durationMs / 60000 : null
 }
 
 function formatPercent(value) {
@@ -526,7 +521,7 @@ const recentSessions = computed(() => {
         status: statusInfo.label,
         statusClass: statusInfo.className,
         statusIcon: statusInfo.icon,
-        duration: formatDuration(getSessionDurationMinutes(session)),
+        duration: formatDuration(getSessionDurationMs(session)),
         sortStamp: getSessionSortStamp(session),
       }
     })
@@ -600,7 +595,7 @@ const kpiCards = computed(() => {
   const sessionsThisWeek = sessions.value.filter((session) => getSessionSortStamp(session) >= weekStart).length
   const activeScenarioCount = new Set(sessions.value.map((session) => getSessionScenarioKey(session)).filter(Boolean)).size
   const durations = sessions.value
-    .map((session) => getSessionDurationMinutes(session))
+    .map((session) => getSessionDurationMs(session))
     .filter((minutes) => minutes !== null && !Number.isNaN(minutes))
   const averageDuration = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null
   const completedSessions = sessions.value.filter((session) => getSessionStatusKey(session) === 'completed').length
@@ -617,7 +612,7 @@ const kpiCards = computed(() => {
     },
     {
       label: 'Gem. sessieduur',
-      value: averageDuration === null ? '—' : `${averageDuration} min`,
+      value: averageDuration === null ? '—' : formatDuration(averageDuration),
     },
     {
       label: 'Afgeronde sessies',

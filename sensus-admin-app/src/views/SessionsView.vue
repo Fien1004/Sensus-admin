@@ -155,6 +155,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { supabase } from '@/services/supabase'
+import { formatDuration } from '@/utils/formatDuration'
 
 const pageSize = 10
 const loading = ref(true)
@@ -475,7 +476,7 @@ function mapSessionRecord(record, index) {
     status: normalizedStatus,
     statusKey: statusKeyFromLabel(normalizedStatus),
     isOffline,
-    durationMinutes: getDurationMinutes(record, startDate, endDate),
+    durationMs: getDurationMs(record, startDate, endDate),
     sessionDate: displayDate,
     sortStamp: displayDate?.getTime?.() || 0,
   }
@@ -579,23 +580,33 @@ function formatTime(date) {
   return new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
 }
 
-function calculateDurationMinutes(startDate, endDate) {
+function calculateDurationMs(startDate, endDate) {
   if (!startDate || !endDate) return null
 
   const diffMs = endDate.getTime() - startDate.getTime()
   if (diffMs <= 0) return null
 
-  return Math.round(diffMs / 60000)
+  return diffMs
+}
+
+function getDurationMs(record, startDate, endDate) {
+  const durationMs = getFirstNumber(record, ['duration_seconds'])
+
+  if (typeof durationMs === 'number' && durationMs >= 0) {
+    return durationMs
+  }
+
+  return calculateDurationMs(startDate, endDate) || 0
 }
 
 function getDurationMinutes(record, startDate, endDate) {
-  const durationSeconds = getFirstNumber(record, ['duration_seconds'])
+  const durationMs = getDurationMs(record, startDate, endDate)
 
-  if (typeof durationSeconds === 'number' && durationSeconds >= 0) {
-    return Math.round(durationSeconds / 60)
+  if (typeof durationMs === 'number' && durationMs >= 0) {
+    return durationMs / 60000
   }
 
-  return calculateDurationMinutes(startDate, endDate) || 0
+  return 0
 }
 
 function isSameCalendarDay(left, right) {
@@ -711,12 +722,12 @@ const kpi = computed(() => {
   const thisWeekCount = all.filter((s) => s.sessionDate && isInCurrentWeek(s.sessionDate)).length
 
   const durationSource = all
-    .map((s) => s.durationMinutes)
+    .map((s) => s.durationMs)
     .filter((value) => typeof value === 'number' && value >= 0)
 
   const avgDuration = durationSource.length
-    ? `${Math.round(durationSource.reduce((sum, value) => sum + value, 0) / durationSource.length)} min`
-    : '0 min'
+    ? formatDuration(Math.round(durationSource.reduce((sum, value) => sum + value, 0) / durationSource.length))
+    : formatDuration(0)
 
   return {
     sessionsThisWeek: thisWeekCount,
