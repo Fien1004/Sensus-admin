@@ -6,8 +6,10 @@
       </div>
 
       <div class="actions">
-        <button type="button" class="action-button save-button" @click="handleSave">+ Opslaan</button>
-        <button type="button" class="action-button publish-button" @click="handleSave">Publiceren</button>
+        <button type="button" class="action-button save-button" :disabled="isSaving" @click="handleSave('draft')">
+          {{ isSaving ? 'Opslaan...' : '+ Opslaan' }}
+        </button>
+        <button type="button" class="action-button publish-button" :disabled="isSaving" @click="handleSave('published')">Publiceren</button>
         <button type="button" class="action-button cancel-button" @click="handleCancel">Annuleer</button>
       </div>
     </header>
@@ -58,6 +60,10 @@
 
     <section class="editor-shell">
       <section class="editor-panel card">
+        <div v-if="saveSuccess" class="save-success" role="status">
+          {{ saveSuccess }}
+        </div>
+
         <div v-if="saveError" class="save-error" role="alert">
           {{ saveError }}
         </div>
@@ -265,12 +271,15 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScenarioEditorState } from '@/composables/useScenarioEditorState'
+import { supabase } from '@/services/supabase'
 
 const router = useRouter()
 
 const { scenario, selectedStepKey, currentStep, currentStepIndex, editorSteps, addStep, removeQuestionStep } = useScenarioEditorState()
 
 const saveError = ref('')
+const saveSuccess = ref('')
+const isSaving = ref(false)
 
 const currentQuestion = computed(() => currentStep.value || { layout: 'chat', options: [] })
 
@@ -414,6 +423,18 @@ function buildScenarioPayload() {
   }
 }
 
+function slugify(value) {
+  return value
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
 function selectStep(stepId) {
   selectedStepKey.value = stepId
 }
@@ -428,17 +449,56 @@ function addQuestionOption() {
   currentStep.value.options.push({ label: '', next: '' })
 }
 
-function handleSave() {
+async function handleSave(status = 'draft') {
   const errors = validateEditorState()
 
   if (errors.length > 0) {
     saveError.value = errors.join(' ')
+    saveSuccess.value = ''
     return
   }
 
   saveError.value = ''
+  saveSuccess.value = ''
+  isSaving.value = true
+
   const payload = buildScenarioPayload()
-  console.log(JSON.stringify(payload, null, 2))
+  const isPublished = status === 'published'
+  const engineJson = {
+    intro: payload.intro,
+    steps: payload.steps,
+    status,
+  }
+
+  try {
+    const scenarioSlug = slugify(payload.title)
+
+    if (!scenarioSlug) {
+      throw new Error('Ongeldige scenario naam voor slug')
+    }
+
+    const { error } = await supabase.from('scenarios').insert({
+      title: payload.title,
+      slug: scenarioSlug,
+      description: payload.description,
+      theme: payload.theme,
+      duration: payload.duration,
+      engine_json: engineJson,
+      is_active: isPublished,
+      published_at: isPublished ? new Date().toISOString() : null,
+    })
+
+    if (error) {
+      throw error
+    }
+
+    saveSuccess.value = status === 'published' ? 'Scenario succesvol gepubliceerd' : 'Scenario succesvol opgeslagen als concept'
+  } catch (error) {
+    console.error(error)
+    saveError.value = error?.message || 'Opslaan mislukt'
+  } finally {
+    isSaving.value = false
+  }
 }
 
 function handleCancel() {
@@ -486,6 +546,11 @@ function handleCancel() {
   font-size: 18px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .flow-nav-row {
@@ -626,15 +691,26 @@ function handleCancel() {
   padding: 22px;
 }
 
+.save-success,
 .save-error {
   margin-bottom: 16px;
   padding: 12px 14px;
-  border: 1px solid #fecaca;
   border-radius: 12px;
-  background: #fef2f2;
-  color: #991b1b;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.save-success {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.save-error {
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
 }
 
 .form-block {

@@ -27,6 +27,32 @@ const scenario = reactive({
         { label: '', next: '' },
       ],
     },
+    {
+      id: 'step-2',
+      type: 'question',
+      layout: 'narrative',
+      title: '',
+      description: '',
+      question: '',
+      allowCustomInput: false,
+      options: [
+        { label: '', next: '' },
+        { label: '', next: '' },
+      ],
+    },
+    {
+      id: 'step-3',
+      type: 'question',
+      layout: 'chat',
+      title: '',
+      description: '',
+      question: '',
+      allowCustomInput: true,
+      options: [
+        { label: '', next: '' },
+        { label: '', next: '' },
+      ],
+    },
   ],
   reflection: {
     title: '',
