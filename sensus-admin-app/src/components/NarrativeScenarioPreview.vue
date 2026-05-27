@@ -8,23 +8,64 @@
       <p v-if="step.contentCard?.italicText" class="content-italic">{{ step.contentCard.italicText }}</p>
     </div>
 
-    <p class="preview-body">{{ step.question || 'Vraagtekst' }}</p>
+    <template v-if="step.onlyNextButton">
+      <button type="button" class="preview-option preview-option-custom" @click="goTo(step.next)">
+        <span>{{ step.buttonText || 'Volgende' }}</span>
+      </button>
+    </template>
 
-    <div class="preview-options">
-      <button v-for="(option, optionIndex) in step.options || []" :key="optionIndex" type="button" class="preview-option">
-        <span>{{ option.label || `Keuze ${optionIndex + 1}` }}</span>
-      </button>
-      <button v-if="step.allowCustomInput" type="button" class="preview-option preview-option-custom">
-        <span>Eigen input</span>
-      </button>
-    </div>
+    <template v-else>
+      <p class="preview-body">{{ step.question || 'Vraagtekst' }}</p>
+
+      <div class="preview-options">
+        <button
+          v-for="(option, optionIndex) in options"
+          :key="optionIndex"
+          type="button"
+          class="preview-option"
+          @click="goTo(option.next)"
+        >
+          <span>{{ option.label || `Keuze ${optionIndex + 1}` }}</span>
+        </button>
+        <button v-if="step.allowCustomInput" type="button" class="preview-option preview-option-custom" @click="goTo(customInputNext)">
+          <span>Eigen input</span>
+        </button>
+      </div>
+    </template>
   </section>
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   step: { type: Object, default: () => ({}) },
 })
+
+const emit = defineEmits(['select'])
+
+const options = computed(() => {
+  if (Array.isArray(props.step?.options) && props.step.options.length > 0) {
+    return props.step.options
+  }
+
+  if (Array.isArray(props.step?.choices)) {
+    return props.step.choices
+  }
+
+  return []
+})
+
+const customInputNext = computed(() => {
+  const inputOption = options.value.find((option) => option?.label === 'Eigen input')
+  return inputOption?.next || ''
+})
+
+function goTo(next) {
+  if (!next) return
+
+  emit('select', next)
+}
 </script>
 
 <style scoped>

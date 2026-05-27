@@ -119,7 +119,7 @@
         </div>
 
         <div v-else-if="currentStep?.type === 'question'" class="form-block">
-          <h2 class="section-title">Vraag {{ currentStepIndex + 1 }}</h2>
+          <h2 class="section-title">Stap {{ currentStepIndex + 1 }}</h2>
 
           <label class="field field-wide">
             <span class="field-label">Titel</span>
@@ -128,7 +128,12 @@
 
           <label class="field field-wide">
             <span class="field-label">Beschrijving</span>
-            <textarea v-model="currentQuestion.description" class="field-textarea" placeholder="Beschrijving"></textarea>
+            <textarea v-model="currentQuestion.description" class="field-textarea" placeholder="Schrijf hier iets"></textarea>
+          </label>
+
+          <label v-if="!currentQuestion.onlyNextButton" class="field field-wide">
+            <span class="field-label">Vraag</span>
+            <input v-model="currentQuestion.question" type="text" class="field-input" placeholder="Schrijf hier iets" />
           </label>
 
           <label class="field field-wide">
@@ -139,38 +144,68 @@
             </select>
           </label>
 
-          <div v-if="currentQuestion.layout === 'chat'" class="form-block">
-            <h3 class="section-title">Chatberichten</h3>
-            <div v-for="(message, messageIndex) in currentQuestion.chatMessages" :key="messageIndex" class="chat-message-row">
-              <select v-model="message.sender" class="field-input chat-sender-select">
-                <option value="user">you</option>
-                <option value="other">other</option>
-              </select>
-              <input v-model="message.text" type="text" class="field-input" placeholder="Tekst" />
-              <input v-model="message.time" type="time" class="field-input" />
-              <button type="button" class="flow-tab-delete" @click="removeChatMessage(messageIndex)">×</button>
-            </div>
-            <button type="button" class="flow-add-button" @click="addChatMessage">+ Chatbericht toevoegen</button>
+          <div class="section-header">
+            <h3 class="section-title">Content</h3>
+            <button v-if="currentQuestion.layout === 'chat'" type="button" class="section-add-button" @click="handleAddContentItem">+</button>
           </div>
 
-          <div v-else class="form-block">
-            <h3 class="section-title">Content card</h3>
+          <div v-if="currentQuestion.layout === 'chat'" class="content-list">
+            <div v-for="(message, messageIndex) in currentQuestion.chatMessages" :key="messageIndex" class="chat-message-row">
+              <select v-model="message.sender" class="field-input content-sender-select">
+                <option value="user">Jij</option>
+                <option value="other">Ander</option>
+              </select>
+              <input v-model="message.time" type="text" class="field-input content-time-input" placeholder="--:--" />
+              <input v-model="message.text" type="text" class="field-input" placeholder="Schrijf hier iets" />
+            </div>
+          </div>
+
+          <div v-else class="content-list">
             <label class="field field-wide">
               <span class="field-label">Tekst</span>
-              <textarea v-model="currentQuestion.contentCard.text" class="field-textarea" placeholder="Tekst"></textarea>
+              <textarea v-model="currentQuestion.contentCard.text" class="field-textarea" placeholder="Schrijf hier iets"></textarea>
             </label>
             <label class="field field-wide">
               <span class="field-label">Cursieve actie tekst</span>
-              <input v-model="currentQuestion.contentCard.italicText" type="text" class="field-input" placeholder="(komt nog iets dichter staan)" />
+              <input v-model="currentQuestion.contentCard.italicText" type="text" class="field-input" placeholder="Schrijf hier iets" />
             </label>
           </div>
 
-          <label class="field field-wide">
-            <span class="field-label">Vraag</span>
-            <input v-model="currentQuestion.question" type="text" class="field-input" placeholder="Schrijf hier iets" />
-          </label>
+          <div v-if="!currentQuestion.onlyNextButton" class="section-header">
+            <h3 class="section-title">Keuzes</h3>
+            <button v-if="!currentQuestion.onlyNextButton" type="button" class="section-add-button" @click="addQuestionOption">+</button>
+          </div>
 
-          <div class="question-options">
+          <div class="question-custom-input-toggle-row">
+            <label class="question-custom-input-toggle">
+              <input v-model="currentQuestion.allowCustomInput" type="checkbox" />
+              <span>Eigen input</span>
+            </label>
+
+            <label class="question-custom-input-toggle">
+              <input v-model="currentQuestion.onlyNextButton" type="checkbox" />
+              <span>Alleen volgende knop</span>
+            </label>
+          </div>
+
+          <div v-if="currentQuestion.onlyNextButton" class="single-button-row">
+            <label class="field field-wide">
+              <span class="field-label">Button tekst</span>
+              <input v-model="currentQuestion.buttonText" type="text" class="field-input" placeholder="Schrijf hier iets" />
+            </label>
+
+            <label class="field field-wide">
+              <span class="field-label">Next</span>
+              <select v-model="currentQuestion.next" class="field-input">
+                <option disabled value="">Selectie</option>
+                <option v-for="step in nextStepOptions" :key="step.value" :value="step.value">
+                  {{ step.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+
+          <div v-else class="question-options">
             <div v-for="(option, optionIndex) in currentQuestion.options" :key="optionIndex" class="question-option-row">
               <label class="question-option-label">Keuze {{ optionIndex + 1 }}</label>
 
@@ -189,16 +224,18 @@
                   {{ step.label }}
                 </option>
               </select>
+
+              <button
+                v-if="currentQuestion.options.length > 2"
+                type="button"
+                class="question-option-delete"
+                :aria-label="`Verwijder keuze ${optionIndex + 1}`"
+                title="Verwijder keuze"
+                @click="removeQuestionOption(optionIndex)"
+              >
+                <img :src="trashIcon" alt="" aria-hidden="true" />
+              </button>
             </div>
-          </div>
-
-          <div class="question-actions">
-            <button type="button" class="question-add-choice" @click="addQuestionOption">+ Keuze toevoegen</button>
-
-            <label class="question-custom-input-toggle">
-              <input v-model="currentQuestion.allowCustomInput" type="checkbox" />
-              <span>Eigen input</span>
-            </label>
           </div>
         </div>
 
@@ -279,6 +316,8 @@ import { useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
 import ChatScenarioPreview from '@/components/ChatScenarioPreview.vue'
 import NarrativeScenarioPreview from '@/components/NarrativeScenarioPreview.vue'
+import trashIcon from '@/assets/icons/trash.svg'
+import { createQuestionStep, mapStepsForSave, mapReflectionStepForSave, mapEndStepForSave } from '@/utils/scenarioStepModel'
 
 const router = useRouter()
 
@@ -296,51 +335,9 @@ const scenario = reactive({
     note: 'Dit scenario duurt ongeveer 5 minuten.',
   },
   questionSteps: [
-    {
-      id: 'step-1',
-      type: 'question',
-      layout: 'chat',
-      title: '',
-      description: '',
-      question: '',
-      allowCustomInput: false,
-      options: [{ label: '', next: '' }, { label: '', next: '' }],
-      chatMessages: [
-        { sender: 'user', text: '', time: '' },
-        { sender: 'other', text: '', time: '' },
-      ],
-      contentCard: { text: '', italicText: '' },
-    },
-    {
-      id: 'step-2',
-      type: 'question',
-      layout: 'chat',
-      title: '',
-      description: '',
-      question: '',
-      allowCustomInput: false,
-      options: [{ label: '', next: '' }, { label: '', next: '' }],
-      chatMessages: [
-        { sender: 'user', text: '', time: '' },
-        { sender: 'other', text: '', time: '' },
-      ],
-      contentCard: { text: '', italicText: '' },
-    },
-    {
-      id: 'step-3',
-      type: 'question',
-      layout: 'chat',
-      title: '',
-      description: '',
-      question: '',
-      allowCustomInput: false,
-      options: [{ label: '', next: '' }, { label: '', next: '' }],
-      chatMessages: [
-        { sender: 'user', text: '', time: '' },
-        { sender: 'other', text: '', time: '' },
-      ],
-      contentCard: { text: '', italicText: '' },
-    },
+    createQuestionStep(0),
+    createQuestionStep(1),
+    createQuestionStep(2),
   ],
   reflection: { title: '', body: '', question: '' },
   ending: { title: '', body: '' },
@@ -351,25 +348,12 @@ const savedScenarioId = ref('')
 
 const currentStep = computed(() => scenario.questionSteps.find((step) => step.id === selectedStepKey.value) || null)
 const currentStepIndex = computed(() => scenario.questionSteps.findIndex((step) => step.id === selectedStepKey.value))
-const editorSteps = computed(() => scenario.questionSteps.map((step, index) => ({ id: step.id, label: step.title || `Vraag ${index + 1}` })))
+const editorSteps = computed(() => scenario.questionSteps.map((step, index) => ({ id: step.id, label: `Stap ${index + 1}` })))
+
 
 function addStep() {
   const nextIndex = scenario.questionSteps.length + 1
-  scenario.questionSteps.push({
-    id: `step-${nextIndex}`,
-    type: 'question',
-    layout: 'chat',
-    title: '',
-    description: '',
-    question: '',
-    allowCustomInput: false,
-    options: [{ label: '', next: '' }, { label: '', next: '' }],
-    chatMessages: [
-      { sender: 'user', text: '', time: '' },
-      { sender: 'other', text: '', time: '' },
-    ],
-    contentCard: { text: '', italicText: '' },
-  })
+  scenario.questionSteps.push(createQuestionStep(nextIndex - 1))
   selectedStepKey.value = `step-${nextIndex}`
 }
 
@@ -413,68 +397,6 @@ const nextStepOptions = computed(() => [
   ...editorSteps.value.map((step) => ({ value: step.id, label: step.label })),
 ])
 
-function calculateQuestionProgress(index, totalQuestions) {
-  const totalSteps = totalQuestions + 2
-  return Math.round(((index + 1) / totalSteps) * 100)
-}
-
-function getDefaultNextStep(questionIndex, questionCount) {
-  return questionIndex < questionCount - 1 ? scenario.questionSteps[questionIndex + 1].id : 'reflectie'
-}
-
-function normalizeNextStep(nextStep, fallbackStep) {
-  if (!nextStep) return fallbackStep
-
-  if (nextStep === 'reflection') return 'reflectie'
-  if (nextStep === 'ending') return 'end'
-
-  return nextStep
-}
-
-function buildQuestionStep(question, index, questionCount) {
-  const defaultNextStep = getDefaultNextStep(index, questionCount)
-  const options = question.options
-    .filter((option) => option.label.trim())
-    .map((option) => ({
-      label: option.label.trim(),
-      next: normalizeNextStep(option.next, defaultNextStep),
-    }))
-
-  const description = question.description.trim() || question.question.trim()
-
-  return {
-    id: question.id,
-    type: 'question',
-    layout: question.layout,
-    title: question.title,
-    description,
-    question: question.question,
-    inputType: 'choice',
-    allowCustomInput: question.allowCustomInput,
-    options,
-    ...(question.layout === 'chat'
-      ? {
-          chatMessages: Array.isArray(question.chatMessages)
-            ? question.chatMessages.map((message) => ({
-                sender: message.sender === 'user' ? 'user' : 'other',
-                text: message.text || '',
-                time: message.time || '',
-              }))
-            : [],
-        }
-      : {}),
-    ...(question.layout === 'narrative'
-      ? {
-          contentCard: {
-            text: question.contentCard?.text || '',
-            italicText: question.contentCard?.italicText || '',
-          },
-        }
-      : {}),
-    progress: calculateQuestionProgress(index, questionCount),
-  }
-}
-
 function validateEditorState() {
   const errors = []
 
@@ -492,16 +414,30 @@ function validateEditorState() {
       errors.push(`Vraag ${questionNumber}: titel is verplicht.`)
     }
 
-    if (!question.question.trim()) {
-      errors.push(`Vraag ${questionNumber}: vraag is verplicht.`)
-    }
-
     if (!question.layout) {
       errors.push(`Vraag ${questionNumber}: layout is verplicht.`)
     }
 
-    if (filledOptions.length < 2) {
-      errors.push(`Vraag ${questionNumber} moet minstens 2 ingevulde opties hebben.`)
+    if (question.onlyNextButton) {
+      if (!question.buttonText.trim()) {
+        errors.push(`Vraag ${questionNumber}: button tekst is verplicht.`)
+      }
+
+      if (!question.next.trim()) {
+        errors.push(`Vraag ${questionNumber}: next is verplicht.`)
+      }
+    } else {
+      if (!question.question.trim()) {
+        errors.push(`Vraag ${questionNumber}: vraag is verplicht.`)
+      }
+
+      if (filledOptions.length < 2) {
+        errors.push(`Vraag ${questionNumber} moet minstens 2 ingevulde opties hebben.`)
+      }
+
+      if (question.options.some((option) => !String(option.next || '').trim())) {
+        errors.push(`Vraag ${questionNumber}: elke optie heeft een geldige next nodig.`)
+      }
     }
 
     if (question.options.some((option) => option.next === question.id)) {
@@ -517,26 +453,18 @@ function validateEditorState() {
 }
 
 function buildScenarioPayload() {
-  const questionCount = scenario.questionSteps.length
+  const steps = mapStepsForSave(scenario.questionSteps)
 
-  const steps = scenario.questionSteps.map((question, index) => buildQuestionStep(question, index, questionCount))
-
-  steps.push({
-    id: 'reflectie',
-    type: 'reflection',
+  steps.push(mapReflectionStepForSave({
     title: scenario.reflection.title,
     description: scenario.reflection.body,
     question: scenario.reflection.question,
-    progress: calculateQuestionProgress(questionCount, questionCount),
-  })
+  }, steps.length + 1))
 
-  steps.push({
-    id: 'end',
-    type: 'ending',
+  steps.push(mapEndStepForSave({
     title: scenario.ending.title,
     description: scenario.ending.body,
-    progress: 100,
-  })
+  }, steps.length + 1))
 
   return {
     title: scenario.title,
@@ -588,11 +516,27 @@ function addQuestionOption() {
   currentStep.value.options.push({ label: '', next: '' })
 }
 
+function removeQuestionOption(index) {
+  if (!currentStep.value || !Array.isArray(currentStep.value.options)) return
+  if (currentStep.value.options.length <= 2) return
+
+  currentStep.value.options.splice(index, 1)
+}
+
 function addChatMessage() {
   if (!currentStep.value) return
   if (!Array.isArray(currentStep.value.chatMessages)) currentStep.value.chatMessages = []
 
   currentStep.value.chatMessages.push({ sender: 'user', text: '', time: '' })
+}
+
+function handleAddContentItem() {
+  if (currentQuestion.layout === 'chat') {
+    addChatMessage()
+    return
+  }
+
+  console.log('add content item')
 }
 
 function removeChatMessage(index) {
@@ -917,7 +861,7 @@ function handleCancel() {
 
 .question-option-row {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto 140px;
+  grid-template-columns: 120px minmax(0, 1fr) auto 140px auto;
   gap: 12px;
   align-items: center;
 }
@@ -943,6 +887,85 @@ function handleCancel() {
 
 .question-option-select {
   min-width: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-add-button {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-secondary-600);
+  color: var(--color-surface);
+  font-family: var(--font-family-base);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.content-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-message-row {
+  display: grid;
+  grid-template-columns: 110px 90px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.content-sender-select,
+.content-time-input {
+  width: 100%;
+}
+
+.question-custom-input-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.single-button-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 14px;
+}
+
+.question-option-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.question-option-delete img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.question-option-delete:hover {
+  background: var(--color-danger);
+}
+
+.question-option-delete:hover img {
+  filter: brightness(0) invert(1);
 }
 
 .question-preview {
