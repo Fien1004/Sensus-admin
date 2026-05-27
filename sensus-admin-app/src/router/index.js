@@ -6,6 +6,7 @@ import AdminLayout from '@/layouts/AdminLayout.vue'
 import DashboardView from '@/views/DashboardView.vue'
 import ScenariosView from '@/views/ScenariosView.vue'
 import ScenarioCreateView from '@/views/ScenarioCreateView.vue'
+import ScenarioEditView from '@/views/ScenarioEditView.vue'
 import SessionsView from '@/views/SessionsView.vue'
 import UsersView from '@/views/UsersView.vue'
 import InsightsView from '@/views/InsightsView.vue'
@@ -47,7 +48,8 @@ const router = createRouter({
         },
         {
           path: 'scenarios/:id/edit',
-          component: ScenarioCreateView,
+          name: 'ScenarioEdit',
+          component: ScenarioEditView,
         },
         {
           path: 'sessions',

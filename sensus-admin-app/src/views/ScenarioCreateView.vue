@@ -127,12 +127,43 @@
           </label>
 
           <label class="field field-wide">
+            <span class="field-label">Beschrijving</span>
+            <textarea v-model="currentQuestion.description" class="field-textarea" placeholder="Beschrijving"></textarea>
+          </label>
+
+          <label class="field field-wide">
             <span class="field-label">Layout</span>
             <select v-model="currentQuestion.layout" class="field-input">
               <option value="chat">Chat</option>
               <option value="narrative">Narrative</option>
             </select>
           </label>
+
+          <div v-if="currentQuestion.layout === 'chat'" class="form-block">
+            <h3 class="section-title">Chatberichten</h3>
+            <div v-for="(message, messageIndex) in currentQuestion.chatMessages" :key="messageIndex" class="chat-message-row">
+              <select v-model="message.sender" class="field-input chat-sender-select">
+                <option value="user">you</option>
+                <option value="other">other</option>
+              </select>
+              <input v-model="message.text" type="text" class="field-input" placeholder="Tekst" />
+              <input v-model="message.time" type="time" class="field-input" />
+              <button type="button" class="flow-tab-delete" @click="removeChatMessage(messageIndex)">×</button>
+            </div>
+            <button type="button" class="flow-add-button" @click="addChatMessage">+ Chatbericht toevoegen</button>
+          </div>
+
+          <div v-else class="form-block">
+            <h3 class="section-title">Content card</h3>
+            <label class="field field-wide">
+              <span class="field-label">Tekst</span>
+              <textarea v-model="currentQuestion.contentCard.text" class="field-textarea" placeholder="Tekst"></textarea>
+            </label>
+            <label class="field field-wide">
+              <span class="field-label">Cursieve actie tekst</span>
+              <input v-model="currentQuestion.contentCard.italicText" type="text" class="field-input" placeholder="(komt nog iets dichter staan)" />
+            </label>
+          </div>
 
           <label class="field field-wide">
             <span class="field-label">Vraag</span>
@@ -222,33 +253,8 @@
           </template>
 
           <template v-else-if="currentStep?.type === 'question'">
-            <div v-if="currentQuestion.layout === 'chat'" class="question-preview question-preview--chat">
-              <p class="preview-heading">{{ currentQuestion.title || 'Vraag 1' }}</p>
-              <p class="preview-text">{{ currentQuestion.description || currentQuestion.question || 'Beschrijving' }}</p>
-              <p class="preview-body">{{ currentQuestion.question || 'Vraagtekst' }}</p>
-              <p v-if="currentQuestion.allowCustomInput" class="preview-note">Eigen input toegestaan</p>
-              <div class="preview-options">
-                <button v-for="(option, optionIndex) in currentQuestion.options" :key="optionIndex" type="button" class="preview-option">
-                  <span>{{ option.label || `Keuze ${optionIndex + 1}` }}</span>
-                </button>
-                <button v-if="currentQuestion.allowCustomInput" type="button" class="preview-option preview-option-custom">
-                  <span>Eigen input</span>
-                </button>
-              </div>
-            </div>
-
-            <div v-else class="question-preview question-preview--narrative">
-              <p class="preview-heading">{{ currentQuestion.title || 'Vraag 1' }}</p>
-              <p class="preview-body">{{ currentQuestion.description || currentQuestion.question || 'Vraagtekst' }}</p>
-              <div class="preview-options">
-                <button v-for="(option, optionIndex) in currentQuestion.options" :key="optionIndex" type="button" class="preview-option">
-                  <span>{{ option.label || `Keuze ${optionIndex + 1}` }}</span>
-                </button>
-                <button v-if="currentQuestion.allowCustomInput" type="button" class="preview-option preview-option-custom">
-                  <span>Eigen input</span>
-                </button>
-              </div>
-            </div>
+            <ChatScenarioPreview v-if="currentQuestion.layout === 'chat'" :step="currentQuestion" />
+            <NarrativeScenarioPreview v-else :step="currentQuestion" />
           </template>
 
           <template v-else-if="selectedStepKey === 'reflection'">
@@ -268,14 +274,120 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { useScenarioEditorState } from '@/composables/useScenarioEditorState'
 import { supabase } from '@/services/supabase'
+import ChatScenarioPreview from '@/components/ChatScenarioPreview.vue'
+import NarrativeScenarioPreview from '@/components/NarrativeScenarioPreview.vue'
 
 const router = useRouter()
 
-const { scenario, selectedStepKey, currentStep, currentStepIndex, editorSteps, savedScenarioId, addStep, removeQuestionStep } = useScenarioEditorState()
+// Local editor state (used to avoid relying on a missing composable)
+const scenario = reactive({
+  title: '',
+  description: '',
+  theme: '',
+  duration: '5 minuten',
+  intro: {
+    title: '',
+    description: '',
+    body: '',
+    button: 'Start scenario',
+    note: 'Dit scenario duurt ongeveer 5 minuten.',
+  },
+  questionSteps: [
+    {
+      id: 'step-1',
+      type: 'question',
+      layout: 'chat',
+      title: '',
+      description: '',
+      question: '',
+      allowCustomInput: false,
+      options: [{ label: '', next: '' }, { label: '', next: '' }],
+      chatMessages: [
+        { sender: 'user', text: '', time: '' },
+        { sender: 'other', text: '', time: '' },
+      ],
+      contentCard: { text: '', italicText: '' },
+    },
+    {
+      id: 'step-2',
+      type: 'question',
+      layout: 'chat',
+      title: '',
+      description: '',
+      question: '',
+      allowCustomInput: false,
+      options: [{ label: '', next: '' }, { label: '', next: '' }],
+      chatMessages: [
+        { sender: 'user', text: '', time: '' },
+        { sender: 'other', text: '', time: '' },
+      ],
+      contentCard: { text: '', italicText: '' },
+    },
+    {
+      id: 'step-3',
+      type: 'question',
+      layout: 'chat',
+      title: '',
+      description: '',
+      question: '',
+      allowCustomInput: false,
+      options: [{ label: '', next: '' }, { label: '', next: '' }],
+      chatMessages: [
+        { sender: 'user', text: '', time: '' },
+        { sender: 'other', text: '', time: '' },
+      ],
+      contentCard: { text: '', italicText: '' },
+    },
+  ],
+  reflection: { title: '', body: '', question: '' },
+  ending: { title: '', body: '' },
+})
+
+const selectedStepKey = ref('intro')
+const savedScenarioId = ref('')
+
+const currentStep = computed(() => scenario.questionSteps.find((step) => step.id === selectedStepKey.value) || null)
+const currentStepIndex = computed(() => scenario.questionSteps.findIndex((step) => step.id === selectedStepKey.value))
+const editorSteps = computed(() => scenario.questionSteps.map((step, index) => ({ id: step.id, label: step.title || `Vraag ${index + 1}` })))
+
+function addStep() {
+  const nextIndex = scenario.questionSteps.length + 1
+  scenario.questionSteps.push({
+    id: `step-${nextIndex}`,
+    type: 'question',
+    layout: 'chat',
+    title: '',
+    description: '',
+    question: '',
+    allowCustomInput: false,
+    options: [{ label: '', next: '' }, { label: '', next: '' }],
+    chatMessages: [
+      { sender: 'user', text: '', time: '' },
+      { sender: 'other', text: '', time: '' },
+    ],
+    contentCard: { text: '', italicText: '' },
+  })
+  selectedStepKey.value = `step-${nextIndex}`
+}
+
+function removeQuestionStep(stepId) {
+  if (scenario.questionSteps.length <= 1) return
+
+  const stepIndex = scenario.questionSteps.findIndex((step) => step.id === stepId)
+  if (stepIndex <= 0) return
+
+  const wasActive = selectedStepKey.value === stepId
+  const fallbackStep = scenario.questionSteps[stepIndex - 1] || scenario.questionSteps[0]
+
+  scenario.questionSteps.splice(stepIndex, 1)
+
+  if (wasActive) {
+    selectedStepKey.value = fallbackStep.id
+  }
+}
 
 const saveError = ref('')
 const saveSuccess = ref('')
@@ -340,6 +452,25 @@ function buildQuestionStep(question, index, questionCount) {
     inputType: 'choice',
     allowCustomInput: question.allowCustomInput,
     options,
+    ...(question.layout === 'chat'
+      ? {
+          chatMessages: Array.isArray(question.chatMessages)
+            ? question.chatMessages.map((message) => ({
+                sender: message.sender === 'user' ? 'user' : 'other',
+                text: message.text || '',
+                time: message.time || '',
+              }))
+            : [],
+        }
+      : {}),
+    ...(question.layout === 'narrative'
+      ? {
+          contentCard: {
+            text: question.contentCard?.text || '',
+            italicText: question.contentCard?.italicText || '',
+          },
+        }
+      : {}),
     progress: calculateQuestionProgress(index, questionCount),
   }
 }
@@ -455,6 +586,19 @@ function addQuestionOption() {
   if (!currentStep.value) return
 
   currentStep.value.options.push({ label: '', next: '' })
+}
+
+function addChatMessage() {
+  if (!currentStep.value) return
+  if (!Array.isArray(currentStep.value.chatMessages)) currentStep.value.chatMessages = []
+
+  currentStep.value.chatMessages.push({ sender: 'user', text: '', time: '' })
+}
+
+function removeChatMessage(index) {
+  if (!currentStep.value || !Array.isArray(currentStep.value.chatMessages)) return
+
+  currentStep.value.chatMessages.splice(index, 1)
 }
 
 async function handleSave(status = 'draft') {
