@@ -275,7 +275,7 @@ import { supabase } from '@/services/supabase'
 
 const router = useRouter()
 
-const { scenario, selectedStepKey, currentStep, currentStepIndex, editorSteps, addStep, removeQuestionStep } = useScenarioEditorState()
+const { scenario, selectedStepKey, currentStep, currentStepIndex, editorSteps, savedScenarioId, addStep, removeQuestionStep } = useScenarioEditorState()
 
 const saveError = ref('')
 const saveSuccess = ref('')
@@ -435,6 +435,14 @@ function slugify(value) {
     .replace(/^-|-$/g, '')
 }
 
+function generateDocumentId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `scenario_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
 function selectStep(stepId) {
   selectedStepKey.value = stepId
 }
@@ -464,11 +472,7 @@ async function handleSave(status = 'draft') {
 
   const payload = buildScenarioPayload()
   const isPublished = status === 'published'
-  const engineJson = {
-    intro: payload.intro,
-    steps: payload.steps,
-    status,
-  }
+  const now = new Date().toISOString()
 
   try {
     const scenarioSlug = slugify(payload.title)
@@ -477,22 +481,48 @@ async function handleSave(status = 'draft') {
       throw new Error('Ongeldige scenario naam voor slug')
     }
 
-    const { error } = await supabase.from('scenarios').insert({
+    const scenarioRecord = {
+      document_id: generateDocumentId(),
       title: payload.title,
       slug: scenarioSlug,
       description: payload.description,
       theme: payload.theme,
       duration: payload.duration,
-      engine_json: engineJson,
+      age_min: 15,
+      age_max: 24,
       is_active: isPublished,
-      published_at: isPublished ? new Date().toISOString() : null,
-    })
+      engine_json: {
+        intro: payload.intro,
+        steps: payload.steps,
+      },
+      created_at: now,
+      updated_at: now,
+      published_at: isPublished ? now : null,
+      created_by_id: 1,
+      updated_by_id: 1,
+      locale: null,
+    }
+
+    let request = supabase.from('scenarios')
+
+    if (savedScenarioId.value) {
+      const { document_id, ...updatePayload } = scenarioRecord
+      request = request.update(updatePayload).eq('id', savedScenarioId.value)
+    } else {
+      request = request.insert(scenarioRecord)
+    }
+
+    const { data, error } = await request.select('id').single()
 
     if (error) {
       throw error
     }
 
-    saveSuccess.value = status === 'published' ? 'Scenario succesvol gepubliceerd' : 'Scenario succesvol opgeslagen als concept'
+    if (data?.id) {
+      savedScenarioId.value = data.id
+    }
+
+    saveSuccess.value = status === 'published' ? 'Scenario gepubliceerd' : 'Scenario opgeslagen als concept'
   } catch (error) {
     console.error(error)
     saveError.value = error?.message || 'Opslaan mislukt'

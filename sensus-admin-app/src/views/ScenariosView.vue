@@ -79,12 +79,12 @@
                 <td>{{ scenario.date }}</td>
                 <td>{{ scenario.sessions }}</td>
                 <td>
-                  <label class="switch" :title="scenario.active ? 'Actief' : 'Concept'">
-                    <input type="checkbox" :checked="scenario.active" @change="toggleStatus(scenario.id)" />
+                  <label class="switch" :title="scenario.is_active ? 'Actief' : 'Concept'">
+                    <input type="checkbox" :checked="scenario.is_active" @change="toggleScenarioStatus(scenario)" />
                     <span class="switch-track" aria-hidden="true">
                       <span class="switch-thumb"></span>
                     </span>
-                    <span class="sr-only">{{ scenario.active ? 'Actief' : 'Concept' }}</span>
+                    <span class="sr-only">{{ scenario.is_active ? 'Actief' : 'Concept' }}</span>
                   </label>
                 </td>
                 <td class="actions-col">
@@ -166,7 +166,7 @@ function mapScenarioRecord(record, index) {
   const theme = getFirstString(record, ['theme', 'theme_name', 'category', 'subject']) || 'Onbekend thema'
   const date = formatDateValue(getFirstString(record, ['date', 'created_at', 'updated_at', 'start_date', 'published_at']))
   const sessions = getFirstNumber(record, ['sessions', 'session_count', 'sessionCount', 'number_of_sessions']) ?? 0
-  const active = getScenarioStatus(record)
+  const isActive = getScenarioStatus(record)
 
   return {
     id: record?.id ?? record?.scenario_id ?? record?.scenarioId ?? record?.uuid ?? record?.slug ?? `${index}-${name}`,
@@ -174,7 +174,8 @@ function mapScenarioRecord(record, index) {
     theme,
     date,
     sessions,
-    active,
+    active: isActive,
+    is_active: isActive,
     selected: false,
     sortStamp: getSortStamp(record),
   }
@@ -325,15 +326,30 @@ const filteredScenarios = computed(() => {
   return items
 })
 
-function toggleStatus(id) {
-  scenarioItems.value = scenarioItems.value.map((scenario) => {
-    if (scenario.id !== id) return scenario
+async function toggleScenarioStatus(scenario) {
+  const oldValue = scenario.is_active
+  const newValue = !oldValue
 
-    return {
-      ...scenario,
-      active: !scenario.active,
-    }
-  })
+  scenario.is_active = newValue
+  scenario.active = newValue
+
+  const now = new Date().toISOString()
+
+  const { error } = await supabase
+    .from('scenarios')
+    .update({
+      is_active: newValue,
+      updated_at: now,
+      published_at: newValue ? now : null,
+    })
+    .eq('id', scenario.id)
+
+  if (error) {
+    scenario.is_active = oldValue
+    scenario.active = oldValue
+    console.error('Status update failed:', error)
+    return
+  }
 }
 
 function toggleSelection(id) {

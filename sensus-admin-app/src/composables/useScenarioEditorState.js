@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const scenario = reactive({
@@ -68,6 +68,7 @@ const scenario = reactive({
 export function useScenarioEditorState() {
   const route = useRoute()
   const router = useRouter()
+  const savedScenarioId = ref(null)
 
   const showScenarioEditorSteps = computed(() => {
     return route.path === '/scenarios/new' || /^\/scenarios\/[^/]+\/edit$/.test(route.path)
@@ -140,6 +141,7 @@ export function useScenarioEditorState() {
     currentStep,
     currentStepIndex,
     editorSteps,
+    savedScenarioId,
     addStep,
     removeQuestionStep,
   }
