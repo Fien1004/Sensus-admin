@@ -19,7 +19,42 @@
       </div>
     </header>
 
+    <section class="kpi-grid" aria-label="Sessie KPI overzicht">
+      <article class="card kpi-card">
+        <div class="kpi-label">Sessies deze week</div>
+        <div class="kpi-value">{{ kpi.sessionsThisWeek }}</div>
+        <div class="kpi-meta">Op basis van live data</div>
+      </article>
+
+      <article class="card kpi-card">
+        <div class="kpi-label">Voltooid</div>
+        <div class="kpi-value">{{ kpi.completedPct }}%</div>
+      </article>
+
+      <article class="card kpi-card">
+        <div class="kpi-label">Gem. sessie duur</div>
+        <div class="kpi-value">{{ kpi.avgDuration }}</div>
+      </article>
+
+      <article class="card kpi-card">
+        <div class="kpi-label">Afhaak %</div>
+        <div class="kpi-value">{{ kpi.dropoffPct }}%</div>
+      </article>
+
+      <article class="card kpi-card">
+        <div class="kpi-label">Offline %</div>
+        <div class="kpi-value">{{ kpi.offlinePct }}%</div>
+      </article>
+    </section>
+
     <section class="card overview-card">
+      <header class="section-header">
+        <div>
+          <h2 class="section-title">Recente sessies</h2>
+          <p class="section-description">Filter en zoek door de laatste sessies.</p>
+        </div>
+      </header>
+
       <div class="filters-row">
         <label class="search-field">
           <span class="sr-only">Zoeken</span>
@@ -120,33 +155,56 @@
           <button type="button" class="pagination-button" :disabled="isNextDisabled" @click="goToNextPage">Volgende ›</button>
         </div>
       </footer>
+    </section>
 
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Sessies deze week</div>
-          <div class="kpi-value">{{ kpi.sessionsThisWeek }}</div>
-          <div class="kpi-meta">Op basis van live data</div>
+    <section class="card overview-card analytics-card">
+      <header class="section-header">
+        <div>
+          <h2 class="section-title">Scenario prestaties</h2>
+          <p class="section-description">De verdeling per scenario op basis van de huidige selectie.</p>
         </div>
 
-        <div class="kpi-card">
-          <div class="kpi-label">Voltooid</div>
-          <div class="kpi-value">{{ kpi.completedPct }}%</div>
-        </div>
+        <div class="section-badge">{{ warningText }}</div>
+      </header>
 
-        <div class="kpi-card">
-          <div class="kpi-label">Gem. sessie duur</div>
-          <div class="kpi-value">{{ kpi.avgDuration }}</div>
-        </div>
+      <div class="table-wrap analytics-table-wrap">
+        <table class="sessions-table analytics-table">
+          <thead>
+            <tr>
+              <th>Scenario</th>
+              <th>Sessies</th>
+              <th>Voltooid %</th>
+              <th>Gem. duur</th>
+              <th>Afhaak %</th>
+            </tr>
+          </thead>
 
-        <div class="kpi-card">
-          <div class="kpi-label">Afhaak %</div>
-          <div class="kpi-value">{{ kpi.dropoffPct }}%</div>
-        </div>
+          <tbody v-if="loading">
+            <tr>
+              <td colspan="5">
+                <div class="empty-state">Scenario prestaties laden...</div>
+              </td>
+            </tr>
+          </tbody>
 
-        <div class="kpi-card">
-          <div class="kpi-label">Offline %</div>
-          <div class="kpi-value">{{ kpi.offlinePct }}%</div>
-        </div>
+          <tbody v-else-if="scenarioPerformanceRows.length">
+            <tr v-for="row in scenarioPerformanceRows" :key="row.key">
+              <td class="scenario-name-cell">{{ row.label }}</td>
+              <td>{{ row.sessions }}</td>
+              <td>{{ row.completedPct }}%</td>
+              <td>{{ row.avgDuration }}</td>
+              <td>{{ row.dropoffPct }}%</td>
+            </tr>
+          </tbody>
+
+          <tbody v-else>
+            <tr>
+              <td colspan="5">
+                <div class="empty-state">Geen scenario’s gevonden.</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
   </main>
@@ -774,6 +832,49 @@ const behaviorSummary = computed(() => {
   }
 })
 
+const scenarioPerformanceRows = computed(() => {
+  const groups = new Map()
+
+  for (const session of scenarioSessions.value) {
+    const key = session.scenarioSlug || session.scenario || session.id
+    const label = session.scenario || 'Onbekend scenario'
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label,
+        sessions: 0,
+        completed: 0,
+        dropped: 0,
+        durationTotal: 0,
+        durationCount: 0,
+      })
+    }
+
+    const group = groups.get(key)
+    group.sessions += 1
+
+    if (session.statusKey === 'completed') group.completed += 1
+    if (session.statusKey === 'stopped') group.dropped += 1
+
+    if (typeof session.durationMs === 'number' && session.durationMs >= 0) {
+      group.durationTotal += session.durationMs
+      group.durationCount += 1
+    }
+  }
+
+  return Array.from(groups.values())
+    .sort((left, right) => right.sessions - left.sessions)
+    .map((group) => ({
+      key: group.key,
+      label: group.label,
+      sessions: group.sessions,
+      completedPct: group.sessions ? Math.round((group.completed / group.sessions) * 100) : 0,
+      avgDuration: group.durationCount ? formatDuration(Math.round(group.durationTotal / group.durationCount)) : formatDuration(0),
+      dropoffPct: group.sessions ? Math.round((group.dropped / group.sessions) * 100) : 0,
+    }))
+})
+
 const genders = computed(() => {
   const defaults = [
     { key: 'men', label: 'Mannen', matcher: ['m', 'man', 'male', 'mannen'] },
@@ -813,7 +914,7 @@ const steps = computed(() => {
   padding: 0 var(--space-5) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
 }
 
 .page-header {
@@ -880,15 +981,19 @@ const steps = computed(() => {
 }
 
 .overview-card {
-  padding: 14px 10px 10px;
+  padding: 18px;
   border-radius: 18px;
+}
+
+.analytics-card {
+  padding-top: 18px;
 }
 
 .filters-row {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 0;
+  margin-bottom: 16px;
 }
 
 .search-field {
@@ -960,8 +1065,12 @@ const steps = computed(() => {
 .table-wrap {
   overflow: hidden;
   border-radius: 14px;
-  margin-top: 12px;
+  margin-top: 0;
   border: 1px solid var(--color-border);
+}
+
+.analytics-table-wrap {
+  margin-top: 0;
 }
 
 .sessions-table {
@@ -1106,7 +1215,6 @@ const steps = computed(() => {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
-  margin-top: 18px;
 }
 
 .kpi-card {
@@ -1115,6 +1223,44 @@ const steps = computed(() => {
   border-radius: 14px;
   padding: 18px;
   box-shadow: var(--shadow-sm);
+}
+
+.section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-neutral-900);
+}
+
+.section-description {
+  margin: 6px 0 0;
+  color: var(--color-neutral-700);
+  font-size: 15px;
+}
+
+.section-badge {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(0, 119, 255, 0.08);
+  color: var(--color-info);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.scenario-name-cell {
+  color: var(--color-neutral-900);
+  font-weight: 600;
 }
 
 .kpi-label {

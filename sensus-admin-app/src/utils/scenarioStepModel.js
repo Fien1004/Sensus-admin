@@ -57,10 +57,11 @@ function normalizeRememberItems(rawRemember) {
   })
 }
 
-function normalizeLoadedNextTarget(next, reflectionIds = [], endIds = []) {
+function normalizeLoadedNextTarget(next, stepIdMap = new Map(), reflectionIds = [], endIds = []) {
   const value = typeof next === 'string' ? next.trim() : ''
 
   if (!value) return ''
+  if (stepIdMap.has(value)) return stepIdMap.get(value)
   if (value === 'reflection' || value === 'reflectie') return reflectionIds[0] || ''
   if (value === 'end' || value === 'ending' || value === 'afsluiting') return endIds[0] || ''
 
@@ -554,9 +555,41 @@ function mapStepForSaveWithContext(step = {}, context = {}) {
 export function mapStepsForLoad(rawSteps = []) {
   if (!Array.isArray(rawSteps)) return []
 
+  const stepIdMap = new Map()
   const steps = []
   let reflectionIndex = 0
   let endIndex = 0
+
+  for (let index = 0; index < rawSteps.length; index += 1) {
+    const rawStep = rawSteps[index]
+    const rawId = typeof rawStep?.id === 'string' ? rawStep.id.trim() : ''
+    const type = normalizeStepType(rawStep)
+
+    if (type === STEP_TYPES.REFLECTION) {
+      const normalizedId = getNextReflectionId(reflectionIndex)
+      reflectionIndex += 1
+
+      if (rawId) stepIdMap.set(rawId, normalizedId)
+      stepIdMap.set(normalizedId, normalizedId)
+      continue
+    }
+
+    if (type === STEP_TYPES.END) {
+      const normalizedId = getNextEndId(endIndex)
+      endIndex += 1
+
+      if (rawId) stepIdMap.set(rawId, normalizedId)
+      stepIdMap.set(normalizedId, normalizedId)
+      continue
+    }
+
+    if (rawId) {
+      stepIdMap.set(rawId, rawId)
+    }
+  }
+
+  reflectionIndex = 0
+  endIndex = 0
 
   for (let index = 0; index < rawSteps.length; index += 1) {
     const rawStep = rawSteps[index]
@@ -632,7 +665,7 @@ export function mapStepsForLoad(rawSteps = []) {
       const options = Array.isArray(step.options)
         ? step.options.map((option) => ({
             ...option,
-            next: normalizeLoadedNextTarget(option?.next, reflectionIds, endIds),
+            next: normalizeLoadedNextTarget(option?.next, stepIdMap, reflectionIds, endIds),
           }))
         : []
 
@@ -640,21 +673,21 @@ export function mapStepsForLoad(rawSteps = []) {
         ...step,
         choices: options,
         options,
-        next: normalizeLoadedNextTarget(step.next, reflectionIds, endIds),
+        next: normalizeLoadedNextTarget(step.next, stepIdMap, reflectionIds, endIds),
       }
     }
 
     if (step?.type === STEP_TYPES.CONTINUE) {
       return {
         ...step,
-        next: normalizeLoadedNextTarget(step.next, reflectionIds, endIds),
+        next: normalizeLoadedNextTarget(step.next, stepIdMap, reflectionIds, endIds),
       }
     }
 
     if (step?.type === STEP_TYPES.REFLECTION) {
       return {
         ...step,
-        next: normalizeLoadedNextTarget(step.next, reflectionIds, endIds),
+        next: normalizeLoadedNextTarget(step.next, stepIdMap, reflectionIds, endIds),
       }
     }
 
