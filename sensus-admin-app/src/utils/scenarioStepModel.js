@@ -24,24 +24,24 @@ function indexToLetters(index = 0) {
   return letters || 'a'
 }
 
+export function getNextReflectionId(index = 0) {
+  return `reflection-${String.fromCharCode(97 + Math.max(0, index))}`
+}
+
+export function getNextEndId(index = 0) {
+  return `end-${String.fromCharCode(97 + Math.max(0, index))}`
+}
+
 function createStepId(type, index = 0, overrideId = '') {
-  const normalizedId = typeof overrideId === 'string' ? overrideId.trim() : ''
-
   if (type === STEP_TYPES.REFLECTION) {
-    if (normalizedId && normalizedId !== 'reflection' && !normalizedId.startsWith('reflection-')) {
-      return normalizedId
-    }
-
-    return `reflection-${indexToLetters(index)}`
+    return getNextReflectionId(index)
   }
 
   if (type === STEP_TYPES.END) {
-    if (normalizedId && normalizedId !== 'end' && normalizedId !== 'ending' && !normalizedId.startsWith('end-')) {
-      return normalizedId
-    }
-
-    return `end-${indexToLetters(index)}`
+    return getNextEndId(index)
   }
+
+  const normalizedId = typeof overrideId === 'string' ? overrideId.trim() : ''
 
   return normalizedId || `step-${index + 1}`
 }
@@ -57,8 +57,12 @@ function normalizeRememberItems(rawRemember) {
   })
 }
 
-function normalizeLoadedNextTarget(next, reflectionIds, endIds) {
+function normalizeLoadedNextTarget(next, reflectionIds = [], endIds = []) {
   const value = typeof next === 'string' ? next.trim() : ''
+
+  if (!value) return ''
+  if (value === 'reflection' || value === 'reflectie') return reflectionIds[0] || ''
+  if (value === 'end' || value === 'ending' || value === 'afsluiting') return endIds[0] || ''
 
   return value
 }
@@ -230,8 +234,12 @@ function mapChatMessagesForSave(rawMessages) {
   })
 }
 
-function normalizeSavedNextTarget(next) {
+function normalizeSavedNextTarget(next, reflectionIds = [], endIds = []) {
   const value = typeof next === 'string' ? next.trim() : ''
+
+  if (!value) return ''
+  if (value === 'reflection' || value === 'reflectie') return reflectionIds[0] || ''
+  if (value === 'end' || value === 'ending' || value === 'afsluiting') return endIds[0] || ''
 
   return value
 }
@@ -242,12 +250,12 @@ function resolveSavedProgress(progress, fallbackIndex) {
   return Number.isFinite(numericProgress) && numericProgress > 0 ? numericProgress : fallbackIndex + 1
 }
 
-function mapOptionsForSave(step = {}) {
+function mapOptionsForSave(step = {}, reflectionIds = [], endIds = []) {
   const baseOptions = Array.isArray(step.options) && step.options.length > 0 ? step.options : Array.isArray(step.choices) ? step.choices : []
   const options = baseOptions
     .map((option) => ({
       label: typeof option?.label === 'string' ? option.label : '',
-      next: normalizeSavedNextTarget(option?.next),
+      next: normalizeSavedNextTarget(option?.next, reflectionIds, endIds),
     }))
     .filter((option) => option.label || option.next)
 
@@ -273,9 +281,9 @@ function buildSavedContentCard(step = {}) {
   return hasContentCardData(contentCard) ? contentCard : null
 }
 
-function createSavedQuestionStep(step = {}) {
+function createSavedQuestionStep(step = {}, reflectionIds = [], endIds = []) {
   const id = typeof step.id === 'string' && step.id.trim() ? step.id : ''
-  const options = mapOptionsForSave(step)
+  const options = mapOptionsForSave(step, reflectionIds, endIds)
   const chatMessages = mapChatMessagesForSave(step.chatMessages)
   const savedStep = {
     id,
@@ -298,10 +306,10 @@ function createSavedQuestionStep(step = {}) {
   return savedStep
 }
 
-function createSavedContinueStep(step = {}) {
+function createSavedContinueStep(step = {}, reflectionIds = [], endIds = []) {
   return {
     id: typeof step.id === 'string' && step.id.trim() ? step.id : '',
-    next: normalizeSavedNextTarget(step.next),
+    next: normalizeSavedNextTarget(step.next, reflectionIds, endIds),
     type: STEP_TYPES.CONTINUE,
     title: typeof step.title === 'string' ? step.title : '',
     button: typeof step.buttonText === 'string' && step.buttonText.trim() ? step.buttonText : 'Volgende',
@@ -312,17 +320,17 @@ function createSavedContinueStep(step = {}) {
   }
 }
 
-function createSavedInputStep(step = {}) {
+function createSavedInputStep(step = {}, reflectionIds = [], endIds = []) {
   const id = typeof step.id === 'string' && step.id.trim() ? step.id : ''
   const inputStepId = `${id}-input`
-  const questionOptions = mapOptionsForSave({ ...step, allowCustomInput: false })
+  const questionOptions = mapOptionsForSave({ ...step, allowCustomInput: false }, reflectionIds, endIds)
   const nextTarget = typeof step.customInputNext === 'string' && step.customInputNext.trim()
     ? step.customInputNext
     : questionOptions[0]?.next || ''
 
   return {
     id: inputStepId,
-    next: normalizeSavedNextTarget(nextTarget),
+    next: normalizeSavedNextTarget(nextTarget, reflectionIds, endIds),
     type: STEP_TYPES.QUESTION,
     title: typeof step.title === 'string' ? step.title : '',
     layout: step.layout === 'narrative' ? 'narrative' : 'chat',
@@ -335,10 +343,10 @@ function createSavedInputStep(step = {}) {
   }
 }
 
-function createSavedReflectionStep(step = {}, progressIndex = 0) {
+function createSavedReflectionStep(step = {}, progressIndex = 0, reflectionIds = [], endIds = []) {
   return {
-    id: createStepId(STEP_TYPES.REFLECTION, progressIndex, step.id),
-    next: normalizeSavedNextTarget(step.next),
+    id: typeof step.id === 'string' && step.id.trim() ? step.id.trim() : getNextReflectionId(progressIndex),
+    next: normalizeSavedNextTarget(step.next, reflectionIds, endIds),
     type: STEP_TYPES.REFLECTION,
     title: typeof step.title === 'string' ? step.title : '',
     button: typeof step.button === 'string' && step.button.trim() ? step.button : 'Volgende',
@@ -352,7 +360,7 @@ function createSavedReflectionStep(step = {}, progressIndex = 0) {
 
 function createSavedEndStep(step = {}, progressIndex = 0) {
   return {
-    id: createStepId(STEP_TYPES.END, progressIndex, step.id),
+    id: typeof step.id === 'string' && step.id.trim() ? step.id.trim() : getNextEndId(progressIndex),
     type: STEP_TYPES.END,
     title: typeof step.title === 'string' ? step.title : '',
     description: typeof step.description === 'string' ? step.description : '',
@@ -523,20 +531,24 @@ export function normalizeStep(rawStep = {}, index = 0) {
 }
 
 export function mapStepForSave(step = {}) {
+  return mapStepForSaveWithContext(step)
+}
+
+function mapStepForSaveWithContext(step = {}, context = {}) {
   const type = normalizeStepType(step)
   if (type === STEP_TYPES.CONTINUE || step.onlyNextButton) {
-    return createSavedContinueStep(step)
+    return createSavedContinueStep(step, context.reflectionIds, context.endIds)
   }
 
   if (type === STEP_TYPES.REFLECTION) {
-    return createSavedReflectionStep(step, 0)
+    return createSavedReflectionStep(step, 0, context.reflectionIds, context.endIds)
   }
 
   if (type === STEP_TYPES.END) {
     return createSavedEndStep(step, 0)
   }
 
-  return createSavedQuestionStep(step)
+  return createSavedQuestionStep(step, context.reflectionIds, context.endIds)
 }
 
 export function mapStepsForLoad(rawSteps = []) {
@@ -653,18 +665,21 @@ export function mapStepsForLoad(rawSteps = []) {
 export function mapStepsForSave(steps = []) {
   if (!Array.isArray(steps)) return []
 
+  const reflectionIds = steps.filter((step) => normalizeStepType(step) === STEP_TYPES.REFLECTION).map((step, index) => createStepId(STEP_TYPES.REFLECTION, index, step?.id))
+  const endIds = steps.filter((step) => normalizeStepType(step) === STEP_TYPES.END).map((step, index) => createStepId(STEP_TYPES.END, index, step?.id))
+  const context = { reflectionIds, endIds }
   const savedSteps = []
 
   steps.forEach((step) => {
     if (step.onlyNextButton) {
       savedSteps.push({
-        ...mapStepForSave(step),
+        ...mapStepForSaveWithContext(step, context),
         progress: resolveSavedProgress(step.progress, savedSteps.length),
       })
       return
     }
 
-    const savedStep = mapStepForSave(step)
+    const savedStep = mapStepForSaveWithContext(step, context)
 
     if (!step.allowCustomInput) {
       savedSteps.push({
@@ -674,11 +689,11 @@ export function mapStepsForSave(steps = []) {
       return
     }
 
-    const inputStep = createSavedInputStep(step)
+    const inputStep = createSavedInputStep(step, reflectionIds, endIds)
 
     savedSteps.push({
       ...savedStep,
-      options: mapOptionsForSave(step),
+      options: mapOptionsForSave(step, reflectionIds, endIds),
       progress: resolveSavedProgress(step.progress, savedSteps.length),
     })
     savedSteps.push({
@@ -693,8 +708,8 @@ export function mapStepsForSave(steps = []) {
   }))
 }
 
-export function mapReflectionStepForSave(step = {}, progressIndex = 0) {
-  return createSavedReflectionStep(step, progressIndex)
+export function mapReflectionStepForSave(step = {}, progressIndex = 0, context = {}) {
+  return createSavedReflectionStep(step, progressIndex, [], Array.isArray(context?.endIds) ? context.endIds : [])
 }
 
 export function mapEndStepForSave(step = {}, progressIndex = 0) {

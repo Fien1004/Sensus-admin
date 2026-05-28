@@ -74,7 +74,15 @@
           </template>
         </nav>
 
-        <button type="button" class="flow-add-button" @click="handleAddStep">+ Vraag toevoegen</button>
+        <div class="flow-add-menu">
+          <button type="button" class="flow-add-button" @click="toggleAddMenu">+ Vraag toevoegen</button>
+
+          <div v-if="isAddMenuOpen" class="flow-add-dropdown">
+            <button type="button" class="flow-add-option" @click="handleAddMenuAction('question')">Vraag toevoegen</button>
+            <button type="button" class="flow-add-option" @click="handleAddMenuAction('reflection')">Reflectie toevoegen</button>
+            <button type="button" class="flow-add-option" @click="handleAddMenuAction('end')">Einde toevoegen</button>
+          </div>
+        </div>
       </section>
 
       <section class="editor-shell">
@@ -400,7 +408,7 @@ import { supabase } from '@/services/supabase'
 import ChatScenarioPreview from '@/components/ChatScenarioPreview.vue'
 import NarrativeScenarioPreview from '@/components/NarrativeScenarioPreview.vue'
 import trashIcon from '@/assets/icons/trash.svg'
-import { createQuestionStep as createScenarioQuestionStep, createReflectionStep, createEndStep, getStepIdsFromSteps, mapStepsForLoad, mapStepsForSave, mapReflectionStepForSave, mapEndStepForSave } from '@/utils/scenarioStepModel'
+import { createQuestionStep as createScenarioQuestionStep, createReflectionStep, createEndStep, getNextReflectionId, getNextEndId, getStepIdsFromSteps, mapStepsForLoad, mapStepsForSave, mapReflectionStepForSave, mapEndStepForSave } from '@/utils/scenarioStepModel'
 
 const route = useRoute()
 const router = useRouter()
@@ -426,9 +434,9 @@ function createDefaultScenarioState() {
       button: 'Start scenario',
       note: 'Dit scenario duurt ongeveer 5 minuten.',
     },
-    questionSteps: [createQuestionStep(0), createQuestionStep(1), createQuestionStep(2)],
-      reflections: [createReflectionStep(0), createReflectionStep(1)],
-      ends: [createEndStep(0), createEndStep(1)],
+    questionSteps: [createQuestionStep(0, { title: 'Stap 1' })],
+    reflections: [createReflectionStep(0, { title: 'Reflectie A', next: 'end-a' })],
+    ends: [createEndStep(0, { title: 'Einde A' })],
   }
 }
 
@@ -460,6 +468,7 @@ const saveStatus = ref('Niet opgeslagen')
 let autosaveTimeoutId = null
 const isLoading = ref(true)
 const loadError = ref('')
+const isAddMenuOpen = ref(false)
 
 function getStepLabelLetter(index) {
   return String.fromCharCode(65 + index)
@@ -717,7 +726,9 @@ function buildScenarioPayload() {
   const steps = mapStepsForSave(scenario.questionSteps)
 
   scenario.reflections.forEach((reflection, index) => {
-    steps.push(mapReflectionStepForSave(reflection, steps.length + index + 1))
+    steps.push(mapReflectionStepForSave(reflection, steps.length + index + 1, {
+      endIds: scenario.ends.map((end) => end.id),
+    }))
   })
 
   scenario.ends.forEach((end, index) => {
@@ -749,14 +760,65 @@ function slugify(value) {
     .replace(/^-|-$/g, '')
 }
 
-function addStep() {
+function addQuestionStep() {
   const nextIndex = scenario.questionSteps.length + 1
-  scenario.questionSteps.push(createScenarioQuestionStep(nextIndex - 1))
-  selectedStepKey.value = `step-${nextIndex}`
+  const step = createScenarioQuestionStep(nextIndex - 1, { title: `Stap ${nextIndex}` })
+  scenario.questionSteps.push(step)
+  selectedStepKey.value = step.id
 }
 
-function handleAddStep() {
-  addStep()
+function addReflectionStep() {
+  const nextIndex = scenario.reflections.length
+  const reflectionId = getNextReflectionId(nextIndex)
+  const step = createReflectionStep(nextIndex, {
+    id: reflectionId,
+    title: `Reflectie ${getStepLabelLetter(nextIndex)}`,
+    next: scenario.ends[0]?.id || getNextEndId(0),
+  })
+
+  scenario.reflections.push(step)
+  selectedStepKey.value = step.id
+}
+
+function addEndStep() {
+  const nextIndex = scenario.ends.length
+  const endId = getNextEndId(nextIndex)
+  const step = createEndStep(nextIndex, {
+    id: endId,
+    title: `Einde ${getStepLabelLetter(nextIndex)}`,
+  })
+
+  scenario.ends.push(step)
+  selectedStepKey.value = step.id
+
+  if (scenario.ends.length === 1) {
+    scenario.reflections.forEach((reflection) => {
+      if (!String(reflection.next || '').trim()) {
+        reflection.next = step.id
+      }
+    })
+  }
+}
+
+function toggleAddMenu() {
+  isAddMenuOpen.value = !isAddMenuOpen.value
+}
+
+function handleAddMenuAction(type) {
+  if (type === 'reflection') {
+    addReflectionStep()
+    isAddMenuOpen.value = false
+    return
+  }
+
+  if (type === 'end') {
+    addEndStep()
+    isAddMenuOpen.value = false
+    return
+  }
+
+  addQuestionStep()
+  isAddMenuOpen.value = false
 }
 
 function removeQuestionStep(stepId) {
@@ -1119,6 +1181,46 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   cursor: pointer;
   height: 38px;
+}
+
+.flow-add-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.flow-add-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  z-index: 20;
+}
+
+.flow-add-option {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--color-neutral-900);
+  font-family: var(--font-family-base);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flow-add-option:hover {
+  background: var(--color-neutral-100);
 }
 
 .save-button {
