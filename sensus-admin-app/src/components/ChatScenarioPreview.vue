@@ -31,7 +31,7 @@
 
       <div class="preview-options">
         <button
-          v-for="(option, optionIndex) in options"
+          v-for="(option, optionIndex) in previewOptions"
           :key="optionIndex"
           type="button"
           class="preview-option"
@@ -39,7 +39,7 @@
         >
           <span>{{ option.label || `Keuze ${optionIndex + 1}` }}</span>
         </button>
-        <button v-if="step.allowCustomInput" type="button" class="preview-option preview-option-custom" @click="goTo(customInputNext)">
+        <button v-if="hasCustomInput" type="button" class="preview-option preview-option-custom" @click="goTo(customInputNext)">
           <span>Eigen input</span>
         </button>
       </div>
@@ -75,6 +75,13 @@ const options = computed(() => {
   }
 
   return []
+})
+
+const previewOptions = computed(() => options.value.filter((option) => option?.label !== 'Eigen input'))
+
+const hasCustomInput = computed(() => {
+  const hasOption = options.value.some((option) => option?.label === 'Eigen input')
+  return Boolean(props.step?.allowCustomInput || hasOption)
 })
 
 const customInputNext = computed(() => {

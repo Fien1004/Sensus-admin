@@ -250,7 +250,7 @@
                   class="question-option-delete"
                   :aria-label="`Verwijder keuze ${optionIndex + 1}`"
                   title="Verwijder keuze"
-                  @click="removeQuestionOption(optionIndex)"
+                  @click="removeQuestionOption(currentQuestion.options.indexOf(option))"
                 >
                   <img :src="trashIcon" alt="" aria-hidden="true" />
                 </button>
@@ -258,41 +258,98 @@
             </div>
           </div>
 
-          <div v-else-if="selectedStepKey === 'reflection'" class="form-block">
-          <h2 class="section-title">Reflectie</h2>
+          <div v-else-if="currentStep?.type === 'reflection'" class="form-block">
+          <h2 class="section-title">{{ currentStepLabel }}</h2>
 
           <div class="field-grid">
             <label class="field">
-              <span class="field-label">Reflectie titel</span>
-              <input v-model="scenario.reflection.title" type="text" class="field-input" placeholder="Titel" />
+              <span class="field-label">Titel</span>
+              <input v-model="currentStep.title" type="text" class="field-input" placeholder="Titel" />
             </label>
 
             <label class="field">
-              <span class="field-label">Reflectie vraag</span>
-              <input v-model="scenario.reflection.question" type="text" class="field-input" placeholder="Vraag" />
+              <span class="field-label">Button</span>
+              <input v-model="currentStep.button" type="text" class="field-input" placeholder="Volgende" />
             </label>
           </div>
 
           <label class="field field-wide">
-            <span class="field-label">Reflectie body</span>
-            <textarea v-model="scenario.reflection.body" class="field-textarea" placeholder="Reflectietekst"></textarea>
+            <span class="field-label">Beschrijving</span>
+            <textarea v-model="currentStep.description" class="field-textarea" placeholder="Beschrijving"></textarea>
+          </label>
+
+          <label class="field field-wide">
+            <span class="field-label">Vraag</span>
+            <input v-model="currentStep.question" type="text" class="field-input" placeholder="Vraag" />
+          </label>
+
+          <label class="field field-wide">
+            <span class="field-label">Placeholder</span>
+            <input v-model="currentStep.placeholder" type="text" class="field-input" placeholder="Vul hier je antwoord in." />
+          </label>
+
+          <label class="field field-wide">
+            <span class="field-label">Next</span>
+            <select v-model="currentStep.next" class="field-input">
+              <option disabled value="">Selectie</option>
+              <option v-for="step in reflectionNextOptions" :key="step.value" :value="step.value">
+                {{ step.label }}
+              </option>
+            </select>
           </label>
         </div>
 
-          <div v-else-if="selectedStepKey === 'ending'" class="form-block">
-          <h2 class="section-title">Afsluiting</h2>
+          <div v-else-if="currentStep?.type === 'end'" class="form-block">
+          <h2 class="section-title">{{ currentStepLabel }}</h2>
 
           <div class="field-grid">
             <label class="field">
-              <span class="field-label">Afsluit titel</span>
-              <input v-model="scenario.ending.title" type="text" class="field-input" placeholder="Titel" />
+              <span class="field-label">Titel</span>
+              <input v-model="currentStep.title" type="text" class="field-input" placeholder="Titel" />
+            </label>
+
+            <label class="field">
+              <span class="field-label">Button</span>
+              <input v-model="currentStep.button" type="text" class="field-input" placeholder="Afronden" />
             </label>
           </div>
 
           <label class="field field-wide">
-            <span class="field-label">Afsluit tekst</span>
-            <textarea v-model="scenario.ending.body" class="field-textarea" placeholder="Afsluitende tekst"></textarea>
+            <span class="field-label">Beschrijving</span>
+            <textarea v-model="currentStep.description" class="field-textarea" placeholder="Beschrijving"></textarea>
           </label>
+
+          <label class="field field-wide">
+            <span class="field-label">Extra tekst</span>
+            <textarea v-model="currentStep.extraText" class="field-textarea" placeholder="Extra tekst"></textarea>
+          </label>
+
+          <label class="field field-wide">
+            <span class="field-label">Remember title</span>
+            <input v-model="currentStep.rememberTitle" type="text" class="field-input" placeholder="Onthoud dit" />
+          </label>
+
+          <div class="section-header">
+            <h3 class="section-title">Remember items</h3>
+            <button type="button" class="section-add-button" @click="addRememberItem">+</button>
+          </div>
+
+          <div class="remember-list">
+            <div v-for="(item, itemIndex) in currentStep.remember" :key="itemIndex" class="remember-row">
+              <input v-model="currentStep.remember[itemIndex]" type="text" class="field-input" placeholder="Herinnering" />
+
+              <button
+                v-if="currentStep.remember.length > 1"
+                type="button"
+                class="question-option-delete"
+                :aria-label="`Verwijder remember item ${itemIndex + 1}`"
+                title="Verwijder item"
+                @click="removeRememberItem(itemIndex)"
+              >
+                <img :src="trashIcon" alt="" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
         </div>
         </section>
 
@@ -313,15 +370,21 @@
               <NarrativeScenarioPreview v-else :step="currentStep" />
             </template>
 
-            <template v-else-if="selectedStepKey === 'reflection'">
-              <p class="preview-heading">{{ scenario.reflection.title || 'Reflectie' }}</p>
-              <p class="preview-text">{{ scenario.reflection.question || 'Reflectievraag' }}</p>
-              <p class="preview-body">{{ scenario.reflection.body || 'Reflectietekst' }}</p>
+            <template v-else-if="currentStep?.type === 'reflection'">
+              <p class="preview-heading">{{ currentStep.title || 'Reflectie' }}</p>
+              <p class="preview-text">{{ currentStep.question || 'Reflectievraag' }}</p>
+              <p class="preview-body">{{ currentStep.description || 'Reflectietekst' }}</p>
+              <p class="preview-note">{{ currentStep.placeholder || 'Vul hier je antwoord in.' }}</p>
+              <button type="button" class="preview-button">{{ currentStep.button || 'Volgende' }}</button>
             </template>
 
-            <template v-else>
-              <p class="preview-heading">{{ scenario.ending.title || 'Afsluiting' }}</p>
-              <p class="preview-body">{{ scenario.ending.body || 'Afsluitende tekst' }}</p>
+            <template v-else-if="currentStep?.type === 'end'">
+              <p class="preview-heading">{{ currentStep.title || 'Afsluiting' }}</p>
+              <p class="preview-body">{{ currentStep.description || 'Afsluitende tekst' }}</p>
+              <p class="preview-text">{{ currentStep.extraText || 'Extra tekst' }}</p>
+              <p class="preview-note">{{ currentStep.rememberTitle || 'Onthoud dit' }}</p>
+              <p class="preview-note">{{ (currentStep.remember || []).filter(Boolean).join(', ') || 'Geen remember items' }}</p>
+              <button type="button" class="preview-button">{{ currentStep.button || 'Afronden' }}</button>
             </template>
           </div>
         </aside>
@@ -337,7 +400,7 @@ import { supabase } from '@/services/supabase'
 import ChatScenarioPreview from '@/components/ChatScenarioPreview.vue'
 import NarrativeScenarioPreview from '@/components/NarrativeScenarioPreview.vue'
 import trashIcon from '@/assets/icons/trash.svg'
-import { createQuestionStep as createScenarioQuestionStep, mapStepsForLoad, mapStepsForSave, mapReflectionStepForSave, mapEndStepForSave } from '@/utils/scenarioStepModel'
+import { createQuestionStep as createScenarioQuestionStep, createReflectionStep, createEndStep, getStepIdsFromSteps, mapStepsForLoad, mapStepsForSave, mapReflectionStepForSave, mapEndStepForSave } from '@/utils/scenarioStepModel'
 
 const route = useRoute()
 const router = useRouter()
@@ -364,15 +427,8 @@ function createDefaultScenarioState() {
       note: 'Dit scenario duurt ongeveer 5 minuten.',
     },
     questionSteps: [createQuestionStep(0), createQuestionStep(1), createQuestionStep(2)],
-    reflection: {
-      title: '',
-      body: '',
-      question: '',
-    },
-    ending: {
-      title: '',
-      body: '',
-    },
+      reflections: [createReflectionStep(0), createReflectionStep(1)],
+      ends: [createEndStep(0), createEndStep(1)],
   }
 }
 
@@ -405,7 +461,15 @@ let autosaveTimeoutId = null
 const isLoading = ref(true)
 const loadError = ref('')
 
-const currentStep = computed(() => scenario.questionSteps.find((step) => step.id === selectedStepKey.value) || null)
+function getStepLabelLetter(index) {
+  return String.fromCharCode(65 + index)
+}
+
+const currentStep = computed(() => [
+  ...scenario.questionSteps,
+  ...scenario.reflections,
+  ...scenario.ends,
+].find((step) => step.id === selectedStepKey.value) || null)
 const currentStepIndex = computed(() => scenario.questionSteps.findIndex((step) => step.id === selectedStepKey.value))
 const editorSteps = computed(() =>
   scenario.questionSteps.map((step, index) => ({
@@ -413,7 +477,9 @@ const editorSteps = computed(() =>
     label: `Stap ${index + 1}`,
   })),
 )
-const currentQuestion = computed(() => currentStep.value || { layout: 'chat', options: [] })
+const reflectionSteps = computed(() => scenario.reflections.map((step, index) => ({ id: step.id, label: `Reflectie ${getStepLabelLetter(index)}`, type: 'reflection' })))
+const endSteps = computed(() => scenario.ends.map((step, index) => ({ id: step.id, label: `Einde ${getStepLabelLetter(index)}`, type: 'end' })))
+const currentQuestion = computed(() => (currentStep.value?.type === 'question' ? currentStep.value : { layout: 'chat', options: [] }))
 const editorChoices = computed(() => {
   const choices = Array.isArray(currentQuestion.value?.options) ? currentQuestion.value.options : []
   return choices.filter((choice) => choice?.label !== 'Eigen input')
@@ -426,14 +492,40 @@ const flowSteps = computed(() => [
     type: 'question',
     canDelete: index > 0,
   })),
-  { id: 'reflection', label: 'Reflectie', type: 'static' },
-  { id: 'ending', label: 'Afsluiting', type: 'static' },
+  ...reflectionSteps.value,
+  ...endSteps.value,
 ])
-const nextStepOptions = computed(() => [
-  { value: 'reflection', label: 'Reflectie' },
-  { value: 'ending', label: 'Afsluiting' },
-  ...editorSteps.value.map((step) => ({ value: step.id, label: step.label })),
-])
+const currentStepLabel = computed(() => flowSteps.value.find((step) => step.id === selectedStepKey.value)?.label || '')
+const nextStepOptions = computed(() => flowSteps.value.filter((step) => step.id !== 'intro').map((step) => ({ value: step.id, label: step.label })))
+const reflectionNextOptions = computed(() => endSteps.value.map((step) => ({ value: step.id, label: step.label })))
+
+function clearInvalidNextTargets() {
+  const validStepIds = new Set(getStepIdsFromSteps([
+    ...scenario.questionSteps,
+    ...scenario.reflections,
+    ...scenario.ends,
+  ]))
+
+  scenario.questionSteps.forEach((step) => {
+    if (step.onlyNextButton && step.next && !validStepIds.has(step.next)) {
+      step.next = ''
+    }
+
+    if (Array.isArray(step.options)) {
+      step.options.forEach((option) => {
+        if (option.next && !validStepIds.has(option.next)) {
+          option.next = ''
+        }
+      })
+    }
+  })
+
+  scenario.reflections.forEach((step) => {
+    if (step.next && !scenario.ends.some((end) => end.id === step.next)) {
+      step.next = ''
+    }
+  })
+}
 
 function resetScenarioState() {
   Object.assign(scenario, createDefaultScenarioState())
@@ -531,6 +623,8 @@ function selectStep(stepId) {
 
 function validateEditorState() {
   const errors = []
+  const stepIds = new Set(flowSteps.value.map((step) => step.id))
+  const endIds = new Set(scenario.ends.map((step) => step.id))
 
   if (!scenario.title.trim()) errors.push('Scenario naam is verplicht.')
   if (!scenario.description.trim()) errors.push('Scenario beschrijving is verplicht.')
@@ -540,7 +634,10 @@ function validateEditorState() {
 
   scenario.questionSteps.forEach((question, index) => {
     const questionNumber = index + 1
-    const filledOptions = question.options.filter((option) => option.label.trim())
+    const visibleOptions = Array.isArray(question.options)
+      ? question.options.filter((option) => option?.label !== 'Eigen input')
+      : []
+    const filledOptions = visibleOptions.filter((option) => String(option?.label || '').trim())
 
     if (!question.title.trim()) {
       errors.push(`Vraag ${questionNumber}: titel is verplicht.`)
@@ -567,19 +664,51 @@ function validateEditorState() {
         errors.push(`Vraag ${questionNumber} moet minstens 2 ingevulde opties hebben.`)
       }
 
-      if (question.options.some((option) => !String(option.next || '').trim())) {
+      if (visibleOptions.some((option) => !String(option?.next || '').trim())) {
         errors.push(`Vraag ${questionNumber}: elke optie heeft een geldige next nodig.`)
       }
+      visibleOptions.forEach((option, optionIndex) => {
+        const next = String(option?.next || '').trim()
+
+        if (!next) {
+          errors.push(`Vraag ${questionNumber}, keuze ${optionIndex + 1}: next is verplicht.`)
+          return
+        }
+
+        if (!stepIds.has(next)) {
+          errors.push(`Vraag ${questionNumber}, keuze ${optionIndex + 1}: next verwijst naar een onbekende stap.`)
+        }
+      })
     }
 
-    if (question.options.some((option) => option.next === question.id)) {
-      errors.push('Een keuze mag niet naar dezelfde stap verwijzen.')
+    if (question.onlyNextButton) {
+      const next = String(question.next || '').trim()
+
+      if (next && !stepIds.has(next)) {
+        errors.push(`Vraag ${questionNumber}: next verwijst naar een onbekende stap.`)
+      }
     }
   })
 
-  if (!scenario.reflection.title.trim()) errors.push('Reflectie titel is verplicht.')
-  if (!scenario.reflection.question.trim()) errors.push('Reflectie vraag is verplicht.')
-  if (!scenario.ending.title.trim()) errors.push('Afsluit titel is verplicht.')
+  scenario.reflections.forEach((reflection, index) => {
+    const reflectionLabel = `Reflectie ${getStepLabelLetter(index)}`
+    const next = String(reflection.next || '').trim()
+
+    if (!reflection.title.trim()) errors.push(`${reflectionLabel}: titel is verplicht.`)
+    if (!reflection.question.trim()) errors.push(`${reflectionLabel}: vraag is verplicht.`)
+    if (!next) {
+      errors.push(`${reflectionLabel}: next is verplicht.`)
+      return
+    }
+
+    if (!endIds.has(next)) errors.push(`${reflectionLabel}: next moet naar een bestaand einde verwijzen.`)
+  })
+
+  scenario.ends.forEach((end, index) => {
+    const endLabel = `Einde ${getStepLabelLetter(index)}`
+
+    if (!end.title.trim()) errors.push(`${endLabel}: titel is verplicht.`)
+  })
 
   return errors
 }
@@ -587,16 +716,13 @@ function validateEditorState() {
 function buildScenarioPayload() {
   const steps = mapStepsForSave(scenario.questionSteps)
 
-  steps.push(mapReflectionStepForSave({
-    title: scenario.reflection.title,
-    description: scenario.reflection.body,
-    question: scenario.reflection.question,
-  }, steps.length + 1))
+  scenario.reflections.forEach((reflection, index) => {
+    steps.push(mapReflectionStepForSave(reflection, steps.length + index + 1))
+  })
 
-  steps.push(mapEndStepForSave({
-    title: scenario.ending.title,
-    description: scenario.ending.body,
-  }, steps.length + 1))
+  scenario.ends.forEach((end, index) => {
+    steps.push(mapEndStepForSave(end, steps.length + index + 1))
+  })
 
   return {
     title: scenario.title,
@@ -643,6 +769,7 @@ function removeQuestionStep(stepId) {
   const fallbackStep = scenario.questionSteps[stepIndex - 1] || scenario.questionSteps[0]
 
   scenario.questionSteps.splice(stepIndex, 1)
+  clearInvalidNextTargets()
 
   if (wasActive) {
     selectedStepKey.value = fallbackStep.id
@@ -682,6 +809,24 @@ function removeChatMessage(index) {
   currentStep.value.chatMessages.splice(index, 1)
 }
 
+function addRememberItem() {
+  if (!currentStep.value || currentStep.value.type !== 'end') return
+
+  if (!Array.isArray(currentStep.value.remember)) {
+    currentStep.value.remember = []
+  }
+
+  currentStep.value.remember.push('')
+}
+
+function removeRememberItem(index) {
+  if (!currentStep.value || currentStep.value.type !== 'end') return
+  if (!Array.isArray(currentStep.value.remember)) return
+  if (currentStep.value.remember.length <= 1) return
+
+  currentStep.value.remember.splice(index, 1)
+}
+
 async function loadScenarioIntoEditor() {
   isLoading.value = true
   loadError.value = ''
@@ -717,8 +862,8 @@ async function loadScenarioIntoEditor() {
     const engineJson = normalizeEngineJson(data.engine_json)
     const steps = mapStepsForLoad(Array.isArray(engineJson.steps) ? engineJson.steps : [])
     const questionSteps = steps.filter((step) => step?.type === 'question')
-    const reflectionStep = steps.find((step) => step?.type === 'reflection') || {}
-    const endingStep = steps.find((step) => step?.type === 'end') || steps.find((step) => step?.type === 'ending') || {}
+    const reflectionSteps = steps.filter((step) => step?.type === 'reflection')
+    const endSteps = steps.filter((step) => step?.type === 'end')
 
     scenario.title = data.title || ''
     scenario.description = data.description || ''
@@ -732,15 +877,8 @@ async function loadScenarioIntoEditor() {
       note: 'Dit scenario duurt ongeveer 5 minuten.',
     }
     scenario.questionSteps = questionSteps.length > 0 ? questionSteps : createDefaultScenarioState().questionSteps
-    scenario.reflection = {
-      title: typeof reflectionStep.title === 'string' ? reflectionStep.title : '',
-      body: typeof reflectionStep.description === 'string' ? reflectionStep.description : '',
-      question: typeof reflectionStep.question === 'string' ? reflectionStep.question : '',
-    }
-    scenario.ending = {
-      title: typeof endingStep.title === 'string' ? endingStep.title : '',
-      body: typeof endingStep.description === 'string' ? endingStep.description : '',
-    }
+    scenario.reflections = reflectionSteps.length > 0 ? reflectionSteps : createDefaultScenarioState().reflections
+    scenario.ends = endSteps.length > 0 ? endSteps : createDefaultScenarioState().ends
     selectedStepKey.value = 'intro'
   } catch (error) {
     console.error(error)
@@ -1122,6 +1260,19 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.remember-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.remember-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
 }
 
 .chat-message-row {

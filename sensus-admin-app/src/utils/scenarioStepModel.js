@@ -5,6 +5,72 @@ const STEP_TYPES = {
   END: 'end',
 }
 
+function indexToLetters(index = 0) {
+  let value = Number(index)
+
+  if (!Number.isFinite(value) || value < 0) {
+    value = 0
+  }
+
+  value += 1
+  let letters = ''
+
+  while (value > 0) {
+    value -= 1
+    letters = String.fromCharCode(97 + (value % 26)) + letters
+    value = Math.floor(value / 26)
+  }
+
+  return letters || 'a'
+}
+
+function createStepId(type, index = 0, overrideId = '') {
+  const normalizedId = typeof overrideId === 'string' ? overrideId.trim() : ''
+
+  if (type === STEP_TYPES.REFLECTION) {
+    if (normalizedId && normalizedId !== 'reflection' && !normalizedId.startsWith('reflection-')) {
+      return normalizedId
+    }
+
+    return `reflection-${indexToLetters(index)}`
+  }
+
+  if (type === STEP_TYPES.END) {
+    if (normalizedId && normalizedId !== 'end' && normalizedId !== 'ending' && !normalizedId.startsWith('end-')) {
+      return normalizedId
+    }
+
+    return `end-${indexToLetters(index)}`
+  }
+
+  return normalizedId || `step-${index + 1}`
+}
+
+function normalizeRememberItems(rawRemember) {
+  if (!Array.isArray(rawRemember)) return []
+
+  return rawRemember.map((item) => {
+    if (typeof item === 'string') return item
+    if (item && typeof item.text === 'string') return item.text
+    if (item && typeof item.label === 'string') return item.label
+    return ''
+  })
+}
+
+function normalizeLoadedNextTarget(next, reflectionIds, endIds) {
+  const value = typeof next === 'string' ? next.trim() : ''
+
+  return value
+}
+
+export function getStepIdsFromSteps(steps = []) {
+  if (!Array.isArray(steps)) return []
+
+  return steps
+    .map((step) => (typeof step?.id === 'string' ? step.id.trim() : ''))
+    .filter(Boolean)
+}
+
 function createChoice(overrides = {}) {
   return {
     label: '',
@@ -33,19 +99,28 @@ function createContentCard(overrides = {}) {
 
 function createBaseStep(type, index = 0, overrides = {}) {
   return {
-    id: overrides.id || `step-${index + 1}`,
+    id: createStepId(type, index, overrides.id),
     type,
     title: '',
     description: '',
     layout: 'chat',
     ...overrides,
+    id: createStepId(type, index, overrides.id),
   }
 }
 
 function normalizeStepType(rawStep = {}) {
   const rawType = typeof rawStep.type === 'string' ? rawStep.type.trim().toLowerCase() : ''
+  const rawId = typeof rawStep.id === 'string' ? rawStep.id.trim().toLowerCase() : ''
+
+  if (!rawType) {
+    if (rawId.startsWith('reflection-') || rawId === 'reflection' || rawId === 'reflectie') return STEP_TYPES.REFLECTION
+    if (rawId.startsWith('end-') || rawId === 'end' || rawId === 'ending' || rawId === 'afsluiting') return STEP_TYPES.END
+  }
 
   if (rawType === 'ending') return STEP_TYPES.END
+  if (rawType.startsWith('reflection-')) return STEP_TYPES.REFLECTION
+  if (rawType.startsWith('end-')) return STEP_TYPES.END
   if (rawType === 'continue' || rawType === STEP_TYPES.CONTINUE) return STEP_TYPES.CONTINUE
   if (rawType === 'reflection' || rawType === STEP_TYPES.REFLECTION || rawType === 'reflectie') return STEP_TYPES.REFLECTION
   if (rawType === STEP_TYPES.END) return STEP_TYPES.END
@@ -94,6 +169,32 @@ function normalizeContentCard(rawContentCard) {
   }
 }
 
+function normalizeReflectionStep(rawStep = {}) {
+  return {
+    title: typeof rawStep.title === 'string' ? rawStep.title : '',
+    description: typeof rawStep.description === 'string' ? rawStep.description : '',
+    question: typeof rawStep.question === 'string' ? rawStep.question : '',
+    placeholder: typeof rawStep.placeholder === 'string' ? rawStep.placeholder : '',
+    button: typeof rawStep.button === 'string' ? rawStep.button : typeof rawStep.buttonText === 'string' ? rawStep.buttonText : '',
+    next: typeof rawStep.next === 'string' ? rawStep.next : '',
+  }
+}
+
+function normalizeEndStep(rawStep = {}) {
+  return {
+    title: typeof rawStep.title === 'string' ? rawStep.title : '',
+    description: typeof rawStep.description === 'string' ? rawStep.description : '',
+    extraText: typeof rawStep.extraText === 'string' ? rawStep.extraText : '',
+    rememberTitle: typeof rawStep.rememberTitle === 'string'
+      ? rawStep.rememberTitle
+      : typeof rawStep.rememberBlock === 'string'
+        ? rawStep.rememberBlock
+        : '',
+    remember: normalizeRememberItems(rawStep.remember),
+    button: typeof rawStep.button === 'string' ? rawStep.button : typeof rawStep.buttonText === 'string' ? rawStep.buttonText : '',
+  }
+}
+
 function hasContentCardData(contentCard) {
   return Boolean(contentCard && (String(contentCard.text || '').trim() || String(contentCard.italicText || '').trim()))
 }
@@ -131,10 +232,6 @@ function mapChatMessagesForSave(rawMessages) {
 
 function normalizeSavedNextTarget(next) {
   const value = typeof next === 'string' ? next.trim() : ''
-
-  if (!value) return ''
-  if (value === 'reflectie' || value === 'reflection') return 'reflection'
-  if (value === 'afsluiting' || value === 'ending' || value === 'end') return 'end'
 
   return value
 }
@@ -240,11 +337,11 @@ function createSavedInputStep(step = {}) {
 
 function createSavedReflectionStep(step = {}, progressIndex = 0) {
   return {
-    id: 'reflection',
-    next: 'end',
+    id: createStepId(STEP_TYPES.REFLECTION, progressIndex, step.id),
+    next: normalizeSavedNextTarget(step.next),
     type: STEP_TYPES.REFLECTION,
     title: typeof step.title === 'string' ? step.title : '',
-    button: 'Volgende',
+    button: typeof step.button === 'string' && step.button.trim() ? step.button : 'Volgende',
     progress: resolveSavedProgress(step.progress, progressIndex),
     question: typeof step.question === 'string' ? step.question : '',
     inputType: 'textarea',
@@ -255,10 +352,14 @@ function createSavedReflectionStep(step = {}, progressIndex = 0) {
 
 function createSavedEndStep(step = {}, progressIndex = 0) {
   return {
-    id: 'end',
+    id: createStepId(STEP_TYPES.END, progressIndex, step.id),
     type: STEP_TYPES.END,
     title: typeof step.title === 'string' ? step.title : '',
     description: typeof step.description === 'string' ? step.description : '',
+    extraText: typeof step.extraText === 'string' ? step.extraText : '',
+    rememberTitle: typeof step.rememberTitle === 'string' ? step.rememberTitle : '',
+    remember: normalizeRememberItems(step.remember).filter((item) => String(item || '').trim()),
+    button: typeof step.button === 'string' && step.button.trim() ? step.button : 'Afronden',
     progress: resolveSavedProgress(step.progress, progressIndex),
   }
 }
@@ -301,7 +402,12 @@ export function createDefaultStep(type = STEP_TYPES.QUESTION, index = 0, overrid
   if (type === STEP_TYPES.REFLECTION) {
     return {
       ...baseStep,
-      placeholder: '',
+      title: 'Reflectie',
+      description: '',
+      question: '',
+      placeholder: 'Vul hier je antwoord in.',
+      button: 'Volgende',
+      next: '',
       ...overrides,
     }
   }
@@ -309,9 +415,12 @@ export function createDefaultStep(type = STEP_TYPES.QUESTION, index = 0, overrid
   if (type === STEP_TYPES.END) {
     return {
       ...baseStep,
-      rememberBlock: '',
+      title: 'Je hebt het scenario afgerond!',
+      description: '',
       extraText: '',
-      buttonText: '',
+      rememberTitle: 'Onthoud dit',
+      remember: [''],
+      button: 'Afronden',
       ...overrides,
     }
   }
@@ -378,16 +487,14 @@ export function normalizeStep(rawStep = {}, index = 0) {
   if (type === STEP_TYPES.REFLECTION) {
     return {
       ...baseStep,
-      placeholder: typeof rawStep.placeholder === 'string' ? rawStep.placeholder : '',
+      ...normalizeReflectionStep(rawStep),
     }
   }
 
   if (type === STEP_TYPES.END) {
     return {
       ...baseStep,
-      rememberBlock: typeof rawStep.rememberBlock === 'string' ? rawStep.rememberBlock : '',
-      extraText: typeof rawStep.extraText === 'string' ? rawStep.extraText : '',
-      buttonText: typeof rawStep.buttonText === 'string' ? rawStep.buttonText : '',
+      ...normalizeEndStep(rawStep),
     }
   }
 
@@ -436,6 +543,8 @@ export function mapStepsForLoad(rawSteps = []) {
   if (!Array.isArray(rawSteps)) return []
 
   const steps = []
+  let reflectionIndex = 0
+  let endIndex = 0
 
   for (let index = 0; index < rawSteps.length; index += 1) {
     const rawStep = rawSteps[index]
@@ -461,6 +570,24 @@ export function mapStepsForLoad(rawSteps = []) {
 
     const normalizedStep = normalizeStep(rawStep, steps.length)
 
+    if (normalizedStep.type === STEP_TYPES.REFLECTION) {
+      steps.push({
+        ...normalizedStep,
+        id: createStepId(STEP_TYPES.REFLECTION, reflectionIndex, normalizedStep.id),
+      })
+      reflectionIndex += 1
+      continue
+    }
+
+    if (normalizedStep.type === STEP_TYPES.END) {
+      steps.push({
+        ...normalizedStep,
+        id: createStepId(STEP_TYPES.END, endIndex, normalizedStep.id),
+      })
+      endIndex += 1
+      continue
+    }
+
     if (normalizedStep.type === STEP_TYPES.QUESTION && normalizedStep.allowCustomInput && isCustomInputStep(nextRawStep, normalizedStep.id)) {
       const nextStep = normalizeStep(nextRawStep, steps.length + 1)
       const inputStepId = `${normalizedStep.id}-input`
@@ -485,7 +612,42 @@ export function mapStepsForLoad(rawSteps = []) {
     })
   }
 
-  return steps
+  const reflectionIds = steps.filter((step) => step?.type === STEP_TYPES.REFLECTION).map((step) => step.id).filter(Boolean)
+  const endIds = steps.filter((step) => step?.type === STEP_TYPES.END).map((step) => step.id).filter(Boolean)
+
+  return steps.map((step) => {
+    if (step?.type === STEP_TYPES.QUESTION) {
+      const options = Array.isArray(step.options)
+        ? step.options.map((option) => ({
+            ...option,
+            next: normalizeLoadedNextTarget(option?.next, reflectionIds, endIds),
+          }))
+        : []
+
+      return {
+        ...step,
+        choices: options,
+        options,
+        next: normalizeLoadedNextTarget(step.next, reflectionIds, endIds),
+      }
+    }
+
+    if (step?.type === STEP_TYPES.CONTINUE) {
+      return {
+        ...step,
+        next: normalizeLoadedNextTarget(step.next, reflectionIds, endIds),
+      }
+    }
+
+    if (step?.type === STEP_TYPES.REFLECTION) {
+      return {
+        ...step,
+        next: normalizeLoadedNextTarget(step.next, reflectionIds, endIds),
+      }
+    }
+
+    return step
+  })
 }
 
 export function mapStepsForSave(steps = []) {
@@ -541,6 +703,14 @@ export function mapEndStepForSave(step = {}, progressIndex = 0) {
 
 export function createQuestionStep(index = 0, overrides = {}) {
   return createDefaultStep(STEP_TYPES.QUESTION, index, overrides)
+}
+
+export function createReflectionStep(index = 0, overrides = {}) {
+  return createDefaultStep(STEP_TYPES.REFLECTION, index, overrides)
+}
+
+export function createEndStep(index = 0, overrides = {}) {
+  return createDefaultStep(STEP_TYPES.END, index, overrides)
 }
 
 export function normalizeQuestionOptions(rawChoices) {
