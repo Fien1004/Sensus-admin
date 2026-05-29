@@ -85,12 +85,26 @@
         </label>
       </div>
 
+      <div v-if="selectedSessionIds.length" class="bulk-action-bar" role="status">
+        <span class="bulk-action-count">{{ selectedSessionIds.length }} sessies geselecteerd</span>
+        <button type="button" class="bulk-delete-button" :disabled="isActionBusy" @click="openBulkDeleteModal">Verwijderen</button>
+      </div>
+
       <div class="table-wrap">
         <table class="sessions-table">
           <thead>
             <tr>
               <th class="checkbox-col">
-                <input type="checkbox" class="checkbox" aria-label="Selecteer alle sessies" />
+                <input
+                  ref="headerCheckboxRef"
+                  type="checkbox"
+                  class="checkbox"
+                  aria-label="Selecteer alle zichtbare sessies"
+                  :checked="allVisibleSelected"
+                  :aria-checked="hasPartialSelection ? 'mixed' : allVisibleSelected ? 'true' : 'false'"
+                  @click.stop
+                  @change="toggleSelectAllVisible"
+                />
               </th>
               <th>Naam/id</th>
               <th>Scenario</th>
@@ -121,7 +135,14 @@
           <tbody v-else-if="filteredSessions.length">
             <tr v-for="item in filteredSessions" :key="item.id" class="session-row">
               <td class="checkbox-col">
-                <input type="checkbox" class="checkbox" :aria-label="`Selecteer ${item.shortId}`" />
+                <input
+                  type="checkbox"
+                  class="checkbox"
+                  :aria-label="`Selecteer ${item.shortId}`"
+                  :checked="selectedSessionIds.includes(item.id)"
+                  @click.stop
+                  @change="toggleSelection(item.id)"
+                />
               </td>
               <td class="name-cell">{{ item.shortId }}</td>
               <td>{{ item.scenario }}</td>
@@ -293,6 +314,20 @@
 
       </div>
     </Drawer>
+
+    <div v-if="toastMessage" class="toast" role="status" aria-live="polite">{{ toastMessage }}</div>
+
+    <div v-if="confirmModal.open" class="confirm-backdrop" @click.self="closeConfirmModal">
+      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description">
+        <h2 id="confirm-title" class="confirm-title">{{ confirmModal.title }}</h2>
+        <p id="confirm-description" class="confirm-text">{{ confirmModal.message }}</p>
+
+        <div class="confirm-actions">
+          <button type="button" class="confirm-button confirm-button--ghost" :disabled="isActionBusy" @click="closeConfirmModal">Annuleren</button>
+          <button type="button" class="confirm-button confirm-button--danger" :disabled="isActionBusy" @click="confirmDeletion">Verwijderen</button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -320,7 +355,17 @@ const selectedSession = ref(null)
 const selectedSessionEvents = ref([])
 const isSessionEventsLoading = ref(false)
 const sessionEventsError = ref('')
+const selectedSessionIds = ref([])
+const headerCheckboxRef = ref(null)
+const toastMessage = ref('')
+const isActionBusy = ref(false)
+const confirmModal = ref({
+  open: false,
+  title: '',
+  message: '',
+})
 let sessionsChannel = null
+let toastTimeoutId = null
 
 onMounted(() => {
   void fetchSessions()
@@ -345,6 +390,10 @@ onMounted(() => {
 
 onUnmounted(() => {
     window.removeEventListener('click', handleWindowClick)
+
+  if (toastTimeoutId) {
+    clearTimeout(toastTimeoutId)
+  }
 
   if (sessionsChannel) {
     void supabase.removeChannel(sessionsChannel)
@@ -1025,6 +1074,15 @@ const steps = computed(() => {
 })
 
 const selectedSessionDetails = computed(() => buildSessionDrawerDetails(selectedSession.value, selectedSessionEvents.value))
+const visibleSessionIds = computed(() => filteredSessions.value.map((session) => session.id))
+const allVisibleSelected = computed(() => visibleSessionIds.value.length > 0 && visibleSessionIds.value.every((id) => selectedSessionIds.value.includes(id)))
+const hasPartialSelection = computed(() => visibleSessionIds.value.some((id) => selectedSessionIds.value.includes(id)) && !allVisibleSelected.value)
+
+watch([allVisibleSelected, hasPartialSelection], () => {
+  if (headerCheckboxRef.value) {
+    headerCheckboxRef.value.indeterminate = hasPartialSelection.value
+  }
+}, { immediate: true })
 
 watch(sessions, () => {
   if (!selectedSession.value) return
@@ -1033,10 +1091,40 @@ watch(sessions, () => {
   if (refreshedSession) {
     selectedSession.value = refreshedSession
   }
+
+  selectedSessionIds.value = selectedSessionIds.value.filter((id) => sessions.value.some((session) => session.id === id))
+})
+
+watch(filteredSessions, () => {
+  if (headerCheckboxRef.value) {
+    headerCheckboxRef.value.indeterminate = hasPartialSelection.value
+  }
 })
 
 function toggleActionMenu(sessionId) {
   openActionMenuId.value = openActionMenuId.value === sessionId ? null : sessionId
+}
+
+function toggleSelection(id) {
+  if (selectedSessionIds.value.includes(id)) {
+    selectedSessionIds.value = selectedSessionIds.value.filter((sessionId) => sessionId !== id)
+    return
+  }
+
+  selectedSessionIds.value = [...selectedSessionIds.value, id]
+}
+
+function toggleSelectAllVisible() {
+  const ids = visibleSessionIds.value
+
+  if (!ids.length) return
+
+  if (allVisibleSelected.value) {
+    selectedSessionIds.value = selectedSessionIds.value.filter((id) => !ids.includes(id))
+    return
+  }
+
+  selectedSessionIds.value = Array.from(new Set([...selectedSessionIds.value, ...ids]))
 }
 
 function closeActionMenu() {
@@ -1046,6 +1134,69 @@ function closeActionMenu() {
 function handleViewSession(session) {
   void openSessionDrawer(session)
   closeActionMenu()
+}
+
+function openBulkDeleteModal() {
+  if (!selectedSessionIds.value.length) return
+
+  closeActionMenu()
+  confirmModal.value = {
+    open: true,
+    title: 'Sessies verwijderen?',
+    message: 'Weet je zeker dat je deze sessies wilt verwijderen? Deze actie kan niet ongedaan worden.',
+  }
+}
+
+function closeConfirmModal() {
+  confirmModal.value = {
+    open: false,
+    title: '',
+    message: '',
+  }
+}
+
+function showToast(message) {
+  toastMessage.value = message
+
+  if (toastTimeoutId) {
+    clearTimeout(toastTimeoutId)
+  }
+
+  toastTimeoutId = setTimeout(() => {
+    toastMessage.value = ''
+    toastTimeoutId = null
+  }, 3000)
+}
+
+async function confirmDeletion() {
+  if (!selectedSessionIds.value.length) {
+    closeConfirmModal()
+    return
+  }
+
+  isActionBusy.value = true
+
+  try {
+    const ids = [...selectedSessionIds.value]
+
+    const [{ error: eventsError }, { error: sessionsError }] = await Promise.all([
+      supabase.from('events').delete().in('session_id', ids),
+      supabase.from('sessions').delete().in('id', ids),
+    ])
+
+    if (eventsError) throw eventsError
+    if (sessionsError) throw sessionsError
+
+    selectedSessionIds.value = []
+    closeConfirmModal()
+    showToast('Sessies verwijderd')
+    await fetchSessions()
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = error?.message || 'Sessies verwijderen mislukt.'
+  } finally {
+    isActionBusy.value = false
+  }
 }
 
 async function openSessionDrawer(session) {
@@ -1679,6 +1830,52 @@ function normalizeEngineJson(value) {
   color: var(--color-danger);
 }
 
+.bulk-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: 14px;
+  margin-bottom: 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.bulk-action-count {
+  color: var(--color-neutral-900);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.bulk-delete-button {
+  border: none;
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: var(--color-surface);
+  font-family: var(--font-family-base);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: filter var(--transition-fast), transform var(--transition-fast);
+}
+
+.bulk-delete-button:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+.bulk-delete-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.bulk-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
 .empty-state {
   min-height: 96px;
   display: flex;
@@ -1717,6 +1914,97 @@ function normalizeEngineJson(value) {
   width: 1px;
   height: 18px;
   background: var(--color-border);
+}
+
+.toast {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 40;
+  max-width: min(360px, calc(100vw - 40px));
+  padding: 14px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  color: var(--color-neutral-900);
+  box-shadow: var(--shadow-md);
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: color-mix(in srgb, var(--color-neutral-900) 52%, transparent);
+}
+
+.confirm-modal {
+  width: 100%;
+  max-width: 520px;
+  padding: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.confirm-title {
+  margin: 0 0 10px;
+  color: var(--color-neutral-900);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.confirm-text {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.confirm-button {
+  border: none;
+  border-radius: 14px;
+  font-family: var(--font-family-base);
+  font-size: var(--text-md);
+  font-weight: 700;
+  padding: 12px 18px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), filter var(--transition-fast);
+}
+
+.confirm-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.confirm-button--ghost {
+  background: var(--color-surface);
+  color: var(--color-neutral-900);
+  border: 1px solid var(--color-border);
+}
+
+.confirm-button--ghost:hover:not(:disabled) {
+  background: var(--color-neutral-100);
+}
+
+.confirm-button--danger {
+  background: var(--color-danger);
+  color: var(--color-surface);
+}
+
+.confirm-button--danger:hover:not(:disabled) {
+  filter: brightness(0.92);
 }
 
 .kpi-grid {
