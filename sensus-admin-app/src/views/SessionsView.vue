@@ -121,9 +121,9 @@
           <tbody v-else-if="filteredSessions.length">
             <tr v-for="item in filteredSessions" :key="item.id" class="session-row">
               <td class="checkbox-col">
-                <input type="checkbox" class="checkbox" :aria-label="`Selecteer ${item.id}`" />
+                <input type="checkbox" class="checkbox" :aria-label="`Selecteer ${item.shortId}`" />
               </td>
-              <td class="name-cell">{{ item.id }}</td>
+              <td class="name-cell">{{ item.shortId }}</td>
               <td>{{ item.scenario }}</td>
               <td>{{ item.date }}</td>
               <td>{{ item.start }}</td>
@@ -132,7 +132,24 @@
                 <span :class="['status-badge', statusClass(item.status)]">{{ item.status }}</span>
               </td>
               <td class="actions-col">
-                <button type="button" class="actions-button" aria-label="Acties">⋯</button>
+                <div class="actions-menu-wrap">
+                  <button
+                    type="button"
+                    class="actions-button"
+                    aria-label="Acties"
+                    aria-haspopup="menu"
+                    :aria-expanded="openActionMenuId === item.id"
+                    @click.stop="toggleActionMenu(item.id)"
+                  >
+                    ⋯
+                  </button>
+
+                  <div v-if="openActionMenuId === item.id" class="actions-menu" role="menu" :aria-label="`Acties voor ${item.id}`">
+                    <button type="button" class="actions-menu-item" role="menuitem" @click="openSessionDrawer(item)">Bekijken</button>
+                    <button type="button" class="actions-menu-item" role="menuitem" disabled>Exporteren</button>
+                    <button type="button" class="actions-menu-item actions-menu-item--danger" role="menuitem" disabled>Verwijderen</button>
+                  </div>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -207,13 +224,84 @@
         </table>
       </div>
     </section>
+
+    <Drawer
+      :open="Boolean(selectedSession)"
+      title="Sessie bekijken"
+      :subtitle="selectedSession ? `${selectedSession.id} · ${selectedSession.scenario}` : ''"
+      @close="closeSessionDrawer"
+    >
+      <div v-if="selectedSession" class="drawer-stack">
+        <section class="drawer-section">
+          <div class="drawer-section-header">
+            <h3 class="drawer-section-title">Algemene informatie</h3>
+          </div>
+
+          <dl class="detail-grid detail-grid--two">
+            <div v-for="item in selectedSessionDetails.general" :key="item.label" class="detail-item">
+              <dt>{{ item.label }}</dt>
+              <dd :class="item.emphasis ? 'detail-value detail-value--emphasis' : 'detail-value'">{{ item.value }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="drawer-section">
+          <div class="drawer-section-header">
+            <h3 class="drawer-section-title">Gebruikersinformatie</h3>
+          </div>
+
+          <dl class="detail-grid detail-grid--three">
+            <div v-for="item in selectedSessionDetails.user" :key="item.label" class="detail-item">
+              <dt>{{ item.label }}</dt>
+              <dd class="detail-value">{{ item.value }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="drawer-section">
+          <div class="drawer-section-header">
+            <h3 class="drawer-section-title">Scenario verloop</h3>
+          </div>
+
+          <div v-if="isSessionEventsLoading" class="empty-state">Antwoorden laden...</div>
+
+          <div v-else-if="sessionEventsError" class="empty-state table-state-error">{{ sessionEventsError }}</div>
+
+          <div v-else-if="selectedSessionDetails.events.length">
+            <ol class="step-list">
+              <li v-for="(event, index) in selectedSessionDetails.events" :key="`${event.stepId}-${event.type}-${index}`" class="step-list-item">
+                <div class="step-list-badge">{{ event.stepId }}</div>
+                <div class="step-list-body">
+                  <div class="step-list-title">{{ event.type }}</div>
+                  <div class="step-list-answer"><span>Antwoord:</span> {{ event.value }}</div>
+                  <div v-if="event.time" class="step-list-time">{{ event.time }}</div>
+                </div>
+              </li>
+            </ol>
+          </div>
+
+          <div v-else class="empty-state">Geen antwoorden gevonden.</div>
+        </section>
+
+        <section class="drawer-section">
+          <div class="drawer-section-header">
+            <h3 class="drawer-section-title">Reflectie</h3>
+          </div>
+
+          <p class="drawer-copy">{{ selectedSessionDetails.reflection }}</p>
+        </section>
+
+      </div>
+    </Drawer>
   </main>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import Drawer from '@/components/Drawer.vue'
 import { supabase } from '@/services/supabase'
 import { formatDuration } from '@/utils/formatDuration'
+import { mapStepsForLoad } from '@/utils/scenarioStepModel'
 
 const pageSize = 10
 const loading = ref(true)
@@ -227,6 +315,11 @@ const sessions = ref([])
 const scenarios = ref([])
 const reflections = ref([])
 const analyticsRows = ref([])
+const openActionMenuId = ref(null)
+const selectedSession = ref(null)
+const selectedSessionEvents = ref([])
+const isSessionEventsLoading = ref(false)
+const sessionEventsError = ref('')
 let sessionsChannel = null
 
 onMounted(() => {
@@ -246,9 +339,13 @@ onMounted(() => {
       }
     )
     .subscribe()
+
+    window.addEventListener('click', handleWindowClick)
 })
 
 onUnmounted(() => {
+    window.removeEventListener('click', handleWindowClick)
+
   if (sessionsChannel) {
     void supabase.removeChannel(sessionsChannel)
     sessionsChannel = null
@@ -510,7 +607,6 @@ function getFirstNumber(source, keys) {
 
 function mapSessionRecord(record, index) {
   const rawId = getFirstString(record, ['id', 'session_id', 'sessionId', 'uuid']) || `sessie-${index + 1}`
-  const id = shortenId(rawId)
 
   const startDate = getFirstDate(record, ['started_at'])
   const endDate = getFirstDate(record, ['ended_at'])
@@ -523,11 +619,14 @@ function mapSessionRecord(record, index) {
   const scenario = scenarioId ? mapScenario(scenarioId) : 'Onbekend scenario'
 
   return {
-    id,
+    id: rawId,
+    shortId: shortenId(rawId),
+    rawId,
     scenario,
     scenarioSlug: scenarioId || '',
     age: getFirstNumber(record, ['age']) ?? null,
     gender: normalizeGender(getFirstString(record, ['gender'])),
+    accessCode: getFirstString(record, ['access_code', 'accessCode', 'code']) || '',
     date: formatDate(displayDate),
     start: formatTime(startDate),
     end: formatTime(endDate),
@@ -537,7 +636,24 @@ function mapSessionRecord(record, index) {
     durationMs: getDurationMs(record, startDate, endDate),
     sessionDate: displayDate,
     sortStamp: displayDate?.getTime?.() || 0,
+    reflectionText: getFirstString(record, ['reflection_text', 'reflectionText', 'reflection', 'user_reflection', 'reflection_message', 'message']),
+    aiInput: getFirstString(record, ['ai_input', 'aiInput', 'input', 'user_input', 'prompt']),
+    aiClassification: getFirstString(record, ['ai_classification', 'aiClassification', 'classification', 'ai_label']),
+    nextStep: getFirstString(record, ['selected_next_step', 'next_step', 'nextStep', 'recommended_next_step']),
+    raw: record,
   }
+}
+
+function formatTimelineTime(date) {
+  if (!date) return ''
+
+  return new Intl.DateTimeFormat('nl-NL', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
 }
 
 function getScenarioTitle(scenario) {
@@ -907,6 +1023,337 @@ const steps = computed(() => {
     { key: 'step-1', title: 'Stap 1', desc: 'Onbekend', padA: 0, padB: 0, drop: 0 },
   ]
 })
+
+const selectedSessionDetails = computed(() => buildSessionDrawerDetails(selectedSession.value, selectedSessionEvents.value))
+
+watch(sessions, () => {
+  if (!selectedSession.value) return
+
+  const refreshedSession = sessions.value.find((session) => session.id === selectedSession.value.id)
+  if (refreshedSession) {
+    selectedSession.value = refreshedSession
+  }
+})
+
+function toggleActionMenu(sessionId) {
+  openActionMenuId.value = openActionMenuId.value === sessionId ? null : sessionId
+}
+
+async function openSessionDrawer(session) {
+  console.log('selected session', selectedSession)
+  selectedSession.value = session
+  openActionMenuId.value = null
+  selectedSessionEvents.value = []
+  sessionEventsError.value = ''
+
+  if (!session?.id) {
+    return
+  }
+
+  isSessionEventsLoading.value = true
+
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('session_id', session.id)
+      .order('created_at', { ascending: true })
+
+    if (error) throw error
+
+    selectedSessionEvents.value = Array.isArray(data) ? data.map(mapSessionEvent) : []
+  } catch (error) {
+    selectedSessionEvents.value = []
+    sessionEventsError.value = error?.message || 'Antwoorden konden niet worden geladen.'
+  } finally {
+    isSessionEventsLoading.value = false
+  }
+}
+
+function closeSessionDrawer() {
+  selectedSession.value = null
+  selectedSessionEvents.value = []
+  sessionEventsError.value = ''
+}
+
+function handleWindowClick(event) {
+  if (!(event.target instanceof HTMLElement)) {
+    openActionMenuId.value = null
+    return
+  }
+
+  if (event.target.closest('.actions-menu-wrap')) return
+
+  openActionMenuId.value = null
+}
+
+function buildSessionDrawerDetails(session, events) {
+  if (!session) {
+    return {
+      general: [],
+      user: [],
+      events: [],
+      reflection: 'Geen antwoorden gevonden.',
+    }
+  }
+
+  const rawId = session.rawId || session.id
+  const durationValue = typeof session.durationMs === 'number' && session.durationMs >= 0 ? formatDuration(session.durationMs) : '0 sec'
+  const mappedEvents = Array.isArray(events) ? events : []
+  const reflectionEvents = mappedEvents.filter((event) => normalizeText(event.type) === 'reflection')
+  const reflection = reflectionEvents.length
+    ? reflectionEvents.map((event) => formatReflectionLine(event)).join('\n\n')
+    : 'Geen antwoorden gevonden.'
+
+  return {
+    general: [
+      { label: 'Sessie ID', value: rawId || 'Onbekend' },
+      { label: 'Scenario naam', value: session.scenario || 'Onbekend scenario' },
+      { label: 'Status', value: session.status, emphasis: true },
+      { label: 'Datum', value: session.date || 'Onbekend' },
+      { label: 'Starttijd', value: session.start || '--:--' },
+      { label: 'Eindtijd', value: session.end || '--:--' },
+      { label: 'Totale duur', value: durationValue },
+    ],
+    user: [
+      { label: 'Leeftijd', value: session.age ?? 'Onbekend' },
+      { label: 'Geslacht', value: session.gender || 'Onbekend' },
+      { label: 'Access code', value: session.accessCode || 'Onbekend' },
+    ],
+    events: mappedEvents.length ? mappedEvents : [],
+    reflection,
+  }
+}
+
+function mapSessionEvent(event) {
+  return {
+    stepId: getFirstString(event, ['step_id', 'stepId']) || 'Onbekend',
+    type: getFirstString(event, ['type']) || 'Onbekend',
+    value: getFirstString(event, ['value']) || 'Geen antwoord opgeslagen',
+    time: formatTimelineTime(getFirstDate(event, ['created_at'])),
+    sortStamp: getFirstDate(event, ['created_at'])?.getTime?.() || 0,
+  }
+}
+
+function formatReflectionLine(event) {
+  const value = event?.value || 'Geen antwoord opgeslagen'
+
+  return value
+}
+
+function buildScenarioStepCatalog(session) {
+  const scenario = scenarios.value.find((item) => normalizeText(item?.slug) === normalizeText(session.scenarioSlug))
+  const engineJson = normalizeEngineJson(scenario?.engine_json)
+  const steps = mapStepsForLoad(Array.isArray(engineJson.steps) ? engineJson.steps : [])
+
+  const questionSteps = []
+  const reflectionSteps = []
+  const stepById = new Map()
+
+  steps.forEach((step, index) => {
+    const catalogStep = {
+      id: getFirstString(step, ['id']) || `step-${index + 1}`,
+      title: getStepTitle(step, index),
+      type: getFirstString(step, ['type']) || 'question',
+      choices: normalizeStepChoices(step),
+      order: index,
+    }
+
+    stepById.set(normalizeText(catalogStep.id), catalogStep)
+
+    if (catalogStep.type === 'reflection') {
+      reflectionSteps.push(catalogStep)
+      return
+    }
+
+    if (catalogStep.type === 'question') {
+      questionSteps.push(catalogStep)
+    }
+  })
+
+  return {
+    questionSteps,
+    reflectionSteps,
+    stepById,
+  }
+}
+
+function buildStepHistory(session, answerEntries, catalog) {
+  const mappedRows = []
+
+  if (catalog.questionSteps.length) {
+    catalog.questionSteps.forEach((step, index) => {
+      const match = findMatchingAnswerEntry(step, answerEntries, index)
+      mappedRows.push({
+        title: step.title,
+        answer: resolveAnswerText(match, step),
+        time: match?.time || '',
+        sortStamp: match?.sortStamp ?? index,
+      })
+    })
+  } else {
+    answerEntries
+      .filter((entry) => !entry.isReflection)
+      .forEach((entry, index) => {
+        mappedRows.push({
+          title: entry.title || entry.stepId || `Stap ${index + 1}`,
+          answer: resolveAnswerText(entry, null),
+          time: entry.time || '',
+          sortStamp: entry.sortStamp ?? index,
+        })
+      })
+  }
+
+  if (!mappedRows.length) {
+    return [{ title: 'Geen antwoord opgeslagen', answer: 'Geen antwoord opgeslagen', time: '', sortStamp: 0 }]
+  }
+
+  return mappedRows.sort((left, right) => (left.sortStamp || 0) - (right.sortStamp || 0))
+}
+
+function resolveReflectionAnswer(session, answerEntries, catalog) {
+  const rawReflection = getFirstString(session.raw, ['reflection_answer', 'reflectionAnswer', 'reflection_text', 'reflectionText', 'user_reflection', 'reflection_message'])
+  if (rawReflection) return rawReflection
+
+  const reflectionEntry = answerEntries.find((entry) => entry.isReflection || (entry.stepId && normalizeText(entry.stepId).startsWith('reflection')))
+  if (reflectionEntry) return resolveAnswerText(reflectionEntry, catalog.reflectionSteps[0] || null)
+
+  return 'Geen antwoord opgeslagen'
+}
+
+function extractSessionAnswerEntries(record) {
+  const candidateArrays = [
+    record?.answers,
+    record?.responses,
+    record?.scenario_progress,
+    record?.flow,
+    record?.events,
+    record?.steps,
+    record?.path,
+  ]
+
+  const source = candidateArrays.find((value) => Array.isArray(value))
+  if (!source?.length) return []
+
+  return source
+    .map((item, index) => normalizeSessionAnswerEntry(item, index))
+    .filter((item) => item.stepId || item.answer || item.title || item.isReflection)
+    .sort((left, right) => (left.sortStamp || 0) - (right.sortStamp || 0))
+}
+
+function normalizeSessionAnswerEntry(item, index) {
+  if (typeof item === 'string') {
+    return {
+      stepId: '',
+      title: `Stap ${index + 1}`,
+      answer: item.trim() || 'Geen antwoord opgeslagen',
+      time: '',
+      sortStamp: index,
+      isReflection: false,
+    }
+  }
+
+  const stepId = getFirstString(item, ['step_id', 'stepId', 'question_id', 'questionId', 'id', 'step', 'current_step', 'stage'])
+  const reflectionAnswer = getFirstString(item, ['reflection_answer', 'reflectionAnswer', 'reflection_text', 'reflectionText'])
+  const selectedOptionLabel = getFirstString(item, ['selected_option_label', 'option_label', 'choice_label', 'answer_label'])
+  const title = getFirstString(item, ['title', 'label', 'step_title', 'question', 'name']) || stepId || `Stap ${index + 1}`
+  const answer = reflectionAnswer || selectedOptionLabel || getFirstString(item, ['answer', 'response', 'selected_answer', 'value', 'choice', 'selected_choice', 'input', 'text', 'message']) || 'Geen antwoord opgeslagen'
+  const timeSource = getFirstDate(item, ['created_at', 'timestamp', 'occurred_at', 'answered_at', 'time', 'date'])
+  const isReflection = normalizeText(stepId).startsWith('reflection') || Boolean(reflectionAnswer) || normalizeText(getFirstString(item, ['type', 'kind', 'category'])) === 'reflection'
+
+  return {
+    stepId,
+    title,
+    answer,
+    time: formatTimelineTime(timeSource),
+    sortStamp: timeSource?.getTime?.() || getFirstNumber(item, ['progress', 'order', 'index', 'step_index', 'stepIndex']) || index,
+    isReflection,
+    raw: item,
+  }
+}
+
+function findMatchingAnswerEntry(step, answerEntries, fallbackIndex) {
+  const normalizedStepId = normalizeText(step.id)
+
+  const directMatch = answerEntries.find((entry) => normalizeText(entry.stepId) === normalizedStepId)
+  if (directMatch) return directMatch
+
+  const titleMatch = answerEntries.find((entry) => normalizeText(entry.title) === normalizeText(step.title))
+  if (titleMatch) return titleMatch
+
+  const orderedMatch = answerEntries.filter((entry) => !entry.isReflection).find((entry) => Number(entry.sortStamp) === fallbackIndex)
+  if (orderedMatch) return orderedMatch
+
+  return null
+}
+
+function resolveAnswerText(entry, step) {
+  if (!entry) return 'Geen antwoord opgeslagen'
+
+  const directAnswer = normalizeAnswerText(entry.answer)
+  if (!directAnswer) return 'Geen antwoord opgeslagen'
+
+  const customInput = getFirstString(entry.raw, ['custom_input', 'customInput', 'free_text', 'freeText', 'input_text', 'inputText'])
+  if (customInput) return customInput
+
+  const selectedOptionLabel = getFirstString(entry.raw, ['selected_option_label', 'option_label', 'choice_label', 'answer_label'])
+  if (selectedOptionLabel) return selectedOptionLabel
+
+  if (!step?.choices?.length) return directAnswer
+
+  const normalizedAnswer = normalizeText(directAnswer)
+  const choiceByLabel = step.choices.find((choice) => normalizeText(choice.label) === normalizedAnswer)
+  if (choiceByLabel?.label) return choiceByLabel.label
+
+  const choiceByNext = step.choices.find((choice) => normalizeText(choice.next) === normalizedAnswer)
+  if (choiceByNext?.label) return choiceByNext.label
+
+  const choiceByValue = step.choices.find((choice) => normalizeText(choice.value) === normalizedAnswer)
+  if (choiceByValue?.label) return choiceByValue.label
+
+  return directAnswer
+}
+
+function normalizeAnswerText(value) {
+  const text = String(value || '').trim()
+  return text || ''
+}
+
+function buildScenarioStepChoice(choice) {
+  return {
+    label: getFirstString(choice, ['label', 'text', 'name']),
+    next: getFirstString(choice, ['next', 'target', 'id']),
+    value: getFirstString(choice, ['value', 'key', 'slug']),
+  }
+}
+
+function normalizeStepChoices(step) {
+  const sourceChoices = Array.isArray(step?.choices) ? step.choices : Array.isArray(step?.options) ? step.options : []
+  return sourceChoices.map((choice) => buildScenarioStepChoice(choice)).filter((choice) => choice.label || choice.next || choice.value)
+}
+
+function getStepTitle(step, index) {
+  return getFirstString(step, ['title', 'question', 'label', 'description']) || `Stap ${index + 1}`
+}
+
+function normalizeEngineJson(value) {
+  if (!value) return {}
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  if (typeof value === 'object') {
+    return value
+  }
+
+  return {}
+}
 </script>
 
 <style scoped>
@@ -1063,7 +1510,7 @@ const steps = computed(() => {
 }
 
 .table-wrap {
-  overflow: hidden;
+  overflow: visible;
   border-radius: 14px;
   margin-top: 0;
   border: 1px solid var(--color-border);
@@ -1137,6 +1584,50 @@ const steps = computed(() => {
 
 .actions-button:hover {
   background: var(--color-neutral-100);
+}
+
+.actions-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.actions-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 176px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  z-index: 20;
+}
+
+.actions-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  font-family: var(--font-family-base);
+  font-size: 15px;
+  color: var(--color-neutral-900);
+  cursor: pointer;
+}
+
+.actions-menu-item:hover:not(:disabled) {
+  background: var(--color-neutral-100);
+}
+
+.actions-menu-item:disabled {
+  color: var(--color-neutral-500);
+  cursor: not-allowed;
+}
+
+.actions-menu-item--danger {
+  color: var(--color-danger);
 }
 
 .status-badge {
@@ -1291,5 +1782,217 @@ const steps = computed(() => {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.drawer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.drawer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.drawer-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.drawer-section-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-neutral-900);
+}
+
+.detail-grid {
+  display: grid;
+  gap: 12px 14px;
+}
+
+.detail-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-item {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.detail-item dt {
+  color: var(--color-neutral-600);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.detail-value {
+  margin: 0;
+  color: var(--color-neutral-900);
+  font-size: 15px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.detail-value--emphasis {
+  color: var(--color-primary-600);
+  font-weight: 700;
+}
+
+.step-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step-list-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.step-list-badge {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(0, 119, 255, 0.08);
+  color: var(--color-info);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.step-list-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step-list-title {
+  color: var(--color-neutral-900);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.step-list-answer,
+.step-list-time,
+.drawer-copy {
+  color: var(--color-neutral-700);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.step-list-answer span {
+  color: var(--color-neutral-900);
+  font-weight: 600;
+}
+
+.drawer-copy {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+  white-space: pre-line;
+}
+
+@media (max-width: 1200px) {
+  .detail-grid--three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-grid--two,
+  .detail-grid--three {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .page-header,
+  .section-header,
+  .filters-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-field,
+  .select-field,
+  .scenario-select,
+  .select-field:last-child .select-input {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .search-input,
+  .select-input {
+    width: 100%;
+  }
+
+  .actions-menu {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .sessions-view {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+
+  .page-title {
+    font-size: 36px;
+  }
+
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-card,
+  .drawer-section {
+    padding: 14px;
+  }
+
+  .sessions-table thead th,
+  .sessions-table td {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .step-list-item {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
