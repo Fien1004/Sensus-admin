@@ -145,9 +145,9 @@
                   </button>
 
                   <div v-if="openActionMenuId === item.id" class="actions-menu" role="menu" :aria-label="`Acties voor ${item.id}`">
-                    <button type="button" class="actions-menu-item" role="menuitem" @click="openSessionDrawer(item)">Bekijken</button>
-                    <button type="button" class="actions-menu-item" role="menuitem" disabled>Exporteren</button>
-                    <button type="button" class="actions-menu-item actions-menu-item--danger" role="menuitem" disabled>Verwijderen</button>
+                    <button type="button" class="actions-menu-item" role="menuitem" @click="handleViewSession(item)">Bekijken</button>
+                    <button type="button" class="actions-menu-item" role="menuitem" @click="closeActionMenu">Exporteren</button>
+                    <button type="button" class="actions-menu-item actions-menu-item--danger" role="menuitem" @click="closeActionMenu">Verwijderen</button>
                   </div>
                 </div>
               </td>
@@ -1039,10 +1039,18 @@ function toggleActionMenu(sessionId) {
   openActionMenuId.value = openActionMenuId.value === sessionId ? null : sessionId
 }
 
+function closeActionMenu() {
+  openActionMenuId.value = null
+}
+
+function handleViewSession(session) {
+  void openSessionDrawer(session)
+  closeActionMenu()
+}
+
 async function openSessionDrawer(session) {
   console.log('selected session', selectedSession)
   selectedSession.value = session
-  openActionMenuId.value = null
   selectedSessionEvents.value = []
   sessionEventsError.value = ''
 
@@ -1078,13 +1086,13 @@ function closeSessionDrawer() {
 
 function handleWindowClick(event) {
   if (!(event.target instanceof HTMLElement)) {
-    openActionMenuId.value = null
+    closeActionMenu()
     return
   }
 
   if (event.target.closest('.actions-menu-wrap')) return
 
-  openActionMenuId.value = null
+  closeActionMenu()
 }
 
 function buildSessionDrawerDetails(session, events) {
@@ -1550,6 +1558,8 @@ function normalizeEngineJson(value) {
 .actions-col {
   width: 1%;
   white-space: nowrap;
+  position: relative;
+  overflow: visible;
 }
 
 .checkbox-col {
@@ -1588,20 +1598,26 @@ function normalizeEngineJson(value) {
 
 .actions-menu-wrap {
   position: relative;
-  display: inline-flex;
+  display: inline-block;
 }
 
 .actions-menu {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 6px);
   right: 0;
-  min-width: 176px;
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
   padding: 8px;
   border: 1px solid var(--color-border);
-  border-radius: 16px;
-  background: var(--color-surface);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
-  z-index: 20;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
 }
 
 .actions-menu-item {
@@ -1615,6 +1631,7 @@ function normalizeEngineJson(value) {
   font-size: 15px;
   color: var(--color-neutral-900);
   cursor: pointer;
+  display: block;
 }
 
 .actions-menu-item:hover:not(:disabled) {
@@ -1962,7 +1979,7 @@ function normalizeEngineJson(value) {
 
   .actions-menu {
     right: auto;
-    left: 0;
+    left: auto;
   }
 }
 
