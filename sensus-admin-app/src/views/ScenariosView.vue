@@ -200,6 +200,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
 
+const normalizeText = (value) => {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+}
+
 const loading = ref(true)
 const errorMessage = ref('')
 const searchQuery = ref('')
@@ -254,11 +260,20 @@ async function loadScenarios() {
   errorMessage.value = ''
 
   try {
-    const { data, error } = await supabase.from('scenarios').select('*')
+    const [{ data: scenariosData, error: scenariosError }, { data: sessionsData, error: sessionsError }] = await Promise.all([
+      supabase.from('scenarios').select('*'),
+      supabase.from('sessions').select('*'),
+    ])
 
-    if (error) throw error
+    if (scenariosError) throw scenariosError
+    if (sessionsError) throw sessionsError
 
-    const rows = Array.isArray(data) ? data.map((record, index) => mapScenarioRecord(record, index)) : []
+    console.log('sessions columns', Array.isArray(sessionsData) ? sessionsData[0] : null)
+
+    const sessionCountMap = buildSessionCountMap(Array.isArray(sessionsData) ? sessionsData : [])
+    const rows = Array.isArray(scenariosData)
+      ? scenariosData.map((record, index) => mapScenarioRecord(record, index, sessionCountMap))
+      : []
 
     scenarioItems.value = rows.sort((left, right) => right.sortStamp - left.sortStamp)
     selectedScenarioIds.value = selectedScenarioIds.value.filter((id) => rows.some((scenario) => scenario.id === id))
@@ -271,11 +286,11 @@ async function loadScenarios() {
   }
 }
 
-function mapScenarioRecord(record, index) {
+function mapScenarioRecord(record, index, sessionCountMap = new Map()) {
   const name = getFirstString(record, ['title', 'name', 'display_name', 'scenario_name']) || 'Onbekend scenario'
   const theme = getFirstString(record, ['theme', 'theme_name', 'category', 'subject']) || 'Onbekend thema'
   const date = formatDateValue(getFirstString(record, ['date', 'created_at', 'updated_at', 'start_date', 'published_at']))
-  const sessions = getFirstNumber(record, ['sessions', 'session_count', 'sessionCount', 'number_of_sessions']) ?? 0
+  const sessions = getScenarioSessionCount(record, sessionCountMap)
   const isActive = getScenarioStatus(record)
 
   return {
@@ -289,6 +304,34 @@ function mapScenarioRecord(record, index) {
     sortStamp: getSortStamp(record),
     record,
   }
+}
+
+function buildSessionCountMap(sessionRows) {
+  const counts = new Map()
+
+  for (const session of sessionRows) {
+    const scenarioKey = normalizeText(getFirstString(session, ['scenario_id']))
+    if (!scenarioKey) continue
+
+    counts.set(scenarioKey, (counts.get(scenarioKey) || 0) + 1)
+  }
+
+  return counts
+}
+
+function getScenarioSessionCount(record, sessionCountMap) {
+  const candidateKeys = [
+    getFirstString(record, ['id', 'scenario_id', 'scenarioId', 'uuid']),
+    getFirstString(record, ['slug']),
+    getFirstString(record, ['title', 'scenario_title', 'name', 'scenario_name', 'display_name']),
+  ].map(normalizeText).filter(Boolean)
+
+  for (const key of candidateKeys) {
+    const count = sessionCountMap.get(key)
+    if (typeof count === 'number') return count
+  }
+
+  return 0
 }
 
 function getSortStamp(record) {
