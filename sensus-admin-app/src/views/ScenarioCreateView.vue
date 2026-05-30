@@ -154,13 +154,20 @@
 
           <div class="section-header">
             <h3 class="section-title">Content</h3>
-            <button v-if="currentQuestion.layout === 'chat'" type="button" class="section-add-button" @click="handleAddContentItem">+</button>
+            <button
+              v-if="currentQuestion?.layout === 'chat' || currentQuestion?.layout === 'narrative'"
+              type="button"
+              class="section-add-button"
+              @click="handleAddContentItem"
+            >
+              +
+            </button>
           </div>
 
           <div v-if="currentQuestion.layout === 'chat'" class="content-list">
             <div v-for="(message, messageIndex) in currentQuestion.chatMessages" :key="messageIndex" class="chat-message-row">
               <select v-model="message.sender" class="field-input content-sender-select">
-                <option value="user">Jij</option>
+                <option value="you">Jij</option>
                 <option value="other">Ander</option>
               </select>
               <input v-model="message.time" type="text" class="field-input content-time-input" placeholder="--:--" />
@@ -491,7 +498,9 @@ const saveError = ref('')
 const saveSuccess = ref('')
 const isSaving = ref(false)
 
-const currentQuestion = computed(() => (currentStep.value?.type === 'question' ? currentStep.value : { layout: 'chat', options: [] }))
+const currentQuestion = computed(() => (currentStep.value?.type === 'question'
+  ? currentStep.value
+  : { layout: 'chat', options: [], chatMessages: [], contentCard: { text: '', italicText: '' } }))
 const currentReflection = computed(() => (currentStep.value?.type === 'reflection' ? currentStep.value : null))
 const currentEnd = computed(() => (currentStep.value?.type === 'end' ? currentStep.value : null))
 const editorChoices = computed(() => {
@@ -744,16 +753,26 @@ function addChatMessage() {
   if (!currentStep.value) return
   if (!Array.isArray(currentStep.value.chatMessages)) currentStep.value.chatMessages = []
 
-  currentStep.value.chatMessages.push({ sender: 'user', text: '', time: '' })
+  currentStep.value.chatMessages.push({ sender: 'you', text: '', time: '' })
+}
+
+function ensureNarrativeContentCard() {
+  if (!currentStep.value) return
+
+  if (!currentStep.value.contentCard || typeof currentStep.value.contentCard !== 'object') {
+    currentStep.value.contentCard = { text: '', italicText: '' }
+  }
 }
 
 function handleAddContentItem() {
-  if (currentQuestion.layout === 'chat') {
+  if (currentStep.value?.layout === 'chat') {
     addChatMessage()
     return
   }
 
-  console.log('add content item')
+  if (currentStep.value?.layout === 'narrative') {
+    ensureNarrativeContentCard()
+  }
 }
 
 function removeChatMessage(index) {

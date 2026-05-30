@@ -173,13 +173,20 @@
 
             <div class="section-header">
               <h3 class="section-title">Content</h3>
-              <button v-if="currentStep.layout === 'chat'" type="button" class="section-add-button" @click="handleAddContentItem">+</button>
+              <button
+                v-if="currentStep?.layout === 'chat' || currentStep?.layout === 'narrative'"
+                type="button"
+                class="section-add-button"
+                @click="handleAddContentItem"
+              >
+                +
+              </button>
             </div>
 
             <div v-if="currentStep.layout === 'chat'" class="content-list">
               <div v-for="(msg, msgIndex) in currentStep.chatMessages" :key="msgIndex" class="chat-message-row">
                 <select v-model="msg.sender" class="field-input content-sender-select">
-                  <option value="user">Jij</option>
+                  <option value="you">Jij</option>
                   <option value="other">Ander</option>
                 </select>
                 <input v-model="msg.time" type="text" class="field-input content-time-input" placeholder="--:--" />
@@ -854,7 +861,15 @@ function removeQuestionOption(index) {
 function addChatMessage() {
   if (!currentStep.value) return
   if (!Array.isArray(currentStep.value.chatMessages)) currentStep.value.chatMessages = []
-  currentStep.value.chatMessages.push({ sender: 'user', text: '', time: '' })
+  currentStep.value.chatMessages.push({ sender: 'you', text: '', time: '' })
+}
+
+function ensureNarrativeContentCard() {
+  if (!currentStep.value) return
+
+  if (!currentStep.value.contentCard || typeof currentStep.value.contentCard !== 'object') {
+    currentStep.value.contentCard = { text: '', italicText: '' }
+  }
 }
 
 function handleAddContentItem() {
@@ -863,7 +878,9 @@ function handleAddContentItem() {
     return
   }
 
-  console.log('add content item')
+  if (currentStep.value?.layout === 'narrative') {
+    ensureNarrativeContentCard()
+  }
 }
 
 function removeChatMessage(index) {

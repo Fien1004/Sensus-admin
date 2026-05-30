@@ -13,7 +13,7 @@
 
         <div
           v-else
-          :class="['chat-bubble', message.sender === 'user' ? 'chat-bubble--user' : 'chat-bubble--other']"
+          :class="['chat-bubble', isUserMessage(message.sender) ? 'chat-bubble--user' : 'chat-bubble--other']"
         >
           {{ message.text || placeholderText(message.sender) }}
         </div>
@@ -60,7 +60,7 @@ const chatMessages = computed(() => {
   return messages.length > 0
     ? messages
     : [
-        { sender: 'user', text: '', time: '' },
+        { sender: 'you', text: '', time: '' },
         { sender: 'other', text: '', time: '' },
       ]
 })
@@ -101,7 +101,11 @@ function isStatusMessage(message) {
 }
 
 function placeholderText(sender) {
-  return sender === 'user' ? 'Jouw bericht' : 'Bericht'
+  return isUserMessage(sender) ? 'Jouw bericht' : 'Bericht'
+}
+
+function isUserMessage(sender) {
+  return sender === 'you' || sender === 'user'
 }
 
 const emit = defineEmits(['select'])

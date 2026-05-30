@@ -86,11 +86,11 @@ function createChoice(overrides = {}) {
 
 function createChatMessage(overrides = {}) {
   return {
-    sender: 'user',
+    sender: 'you',
     text: '',
     time: '',
     ...overrides,
-    sender: overrides.sender === 'other' ? 'other' : 'user',
+    sender: overrides.sender === 'other' ? 'other' : 'you',
   }
 }
 
@@ -156,7 +156,7 @@ function normalizeChoices(rawChoices) {
 function normalizeChatMessages(rawMessages) {
   return Array.isArray(rawMessages)
     ? rawMessages.map((message) => ({
-        sender: message?.sender === 'other' ? 'other' : 'user',
+        sender: message?.sender === 'other' ? 'other' : 'you',
         text: typeof message?.text === 'string' ? message.text : '',
         time: typeof message?.time === 'string' ? message.time : '',
       }))
