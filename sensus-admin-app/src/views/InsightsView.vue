@@ -47,7 +47,8 @@
         <label class="select-field">
           <span class="sr-only">Scenario</span>
           <select class="select-input" v-model="selectedScenarioKey" :disabled="loadingScenarios">
-            <option v-for="scenario in scenarios" :key="scenario.key" :value="scenario.key">
+            <option v-if="!safeScenarios.length" value="">Geen scenario's beschikbaar</option>
+            <option v-for="scenario in safeScenarios" :key="scenario.key" :value="scenario.key">
               Scenario: {{ scenario.title }}
             </option>
           </select>
@@ -58,7 +59,7 @@
     </div>
 
     <div class="cards-row">
-      <div class="insights-card">
+      <div class="insights-card" v-if="selectedScenario">
         <h2 class="section-title">Kern inzichten voor dit scenario</h2>
 
         <div class="insights-grid">
@@ -76,7 +77,12 @@
         </div>
       </div>
 
-      <aside class="behavior-card">
+      <div v-else class="insights-card">
+        <h2 class="section-title">Kern inzichten voor dit scenario</h2>
+        <div class="warning-box">Selecteer een scenario om scenario-inzichten te zien.</div>
+      </div>
+
+      <aside class="behavior-card" v-if="selectedScenario">
         <h3 class="section-title">Gedrag van gebruikers</h3>
 
         <div class="behavior-grid-vertical">
@@ -94,6 +100,11 @@
         </div>
 
         <div class="behavior-note">{{ behaviorSummary.note }}</div>
+      </aside>
+
+      <aside v-else class="behavior-card">
+        <h3 class="section-title">Gedrag van gebruikers</h3>
+        <div class="behavior-note">Selecteer een scenario om gedrag te analyseren.</div>
       </aside>
     </div>
 
@@ -116,8 +127,8 @@
               <td colspan="5" class="reflection-text">Reflecties laden...</td>
             </tr>
           </tbody>
-          <tbody v-else-if="reflections.length">
-            <tr v-for="r in reflections" :key="r.id" class="reflection-row">
+          <tbody v-else-if="safeReflections.length">
+            <tr v-for="r in safeReflections" :key="r.key" class="reflection-row">
               <td>{{ r.id }}</td>
               <td>{{ r.date }}</td>
               <td>{{ r.age }}</td>
@@ -144,7 +155,7 @@
       <h3 class="section-title">Gedrag in het scenario</h3>
 
       <div class="gender-grid">
-        <div class="gender-card" v-for="g in genders" :key="g.key">
+        <div class="gender-card" v-for="g in safeGenders" :key="g.key">
           <div class="gender-title">{{ g.label }}</div>
           <div class="progress-bar-container">
             <div class="progress-full">
@@ -172,7 +183,7 @@
       <h3 class="section-title">Afhaak per stap</h3>
 
       <div class="steps-outer">
-        <div class="step-row" v-for="step in steps" :key="step.key">
+        <div class="step-row" v-for="step in safeSteps" :key="step.key">
           <div class="step-left">
             <div class="step-title">{{ step.title }}</div>
             <div class="step-desc">{{ step.desc }}</div>
@@ -221,24 +232,68 @@ const errorMessage = ref('')
 const scenarios = ref([])
 const selectedScenarioKey = ref('')
 const sessions = ref([])
-const reflections = ref([])
-const analyticsRows = ref([])
-
-onMounted(() => {
-  void loadScenarios()
-})
-
-watch(selectedScenarioKey, () => {
-  if (!selectedScenario.value) return
-  void loadScenarioData()
-})
-
+const events = ref([])
 const selectedScenario = computed(() => {
   return scenarios.value.find((scenario) => scenario.key === selectedScenarioKey.value) || null
 })
 
+const safeScenarios = computed(() => (Array.isArray(scenarios.value) ? scenarios.value : []))
+const safeSessions = computed(() => (Array.isArray(sessions.value) ? sessions.value : []))
+const safeEvents = computed(() => (Array.isArray(events.value) ? events.value : []))
+const safeReflections = computed(() => (Array.isArray(reflections.value) ? reflections.value : []))
+
+const selectedScenarioSlug = computed(() => normalizeText(selectedScenario.value?.slug))
+
+const scenarioSessions = computed(() => {
+  if (!selectedScenarioSlug.value) return []
+
+  return safeSessions.value.filter((session) => normalizeText(session?.scenario_id) === selectedScenarioSlug.value)
+})
+
+const scenarioSessionMap = computed(() => new Map(
+  scenarioSessions.value.map((session) => [String(session.id), session]),
+))
+
+const scenarioEvents = computed(() => {
+  if (!scenarioSessions.value.length) return []
+
+  const sessionIds = new Set(scenarioSessions.value.map((session) => String(session.id)))
+  return safeEvents.value.filter((event) => sessionIds.has(String(event?.session_id)))
+})
+
+const scenarioChoiceEvents = computed(() => {
+  return scenarioEvents.value.filter((event) => normalizeText(event.type) === 'choice')
+})
+
+const scenarioReflectionEvents = computed(() => {
+  return scenarioEvents.value.filter((event) => normalizeText(event.type) === 'reflection')
+})
+
+const reflections = computed(() => {
+  return scenarioReflectionEvents.value.map((event, index) => {
+    const session = scenarioSessionMap.value.get(String(event.session_id))
+    const sessionId = getFirstString(event, ['session_id', 'sessionId']) || session?.id || `reflection-${index + 1}`
+
+    return {
+      key: getFirstString(event, ['id']) || `${sessionId}-${index}`,
+      id: shortenId(sessionId),
+      date: formatDate(getFirstDate(event, ['created_at'])),
+      age: session?.age ?? 'Onbekend',
+      gender: session?.gender || 'Onbekend',
+      text: getFirstString(event, ['value']) || 'Onbekend',
+    }
+  })
+})
+
+const scenarioKpi = computed(() => calculateSessionSummary(scenarioSessions.value))
+
+onMounted(() => {
+  void loadScenarios()
+  void loadScenarioData()
+})
+
 const filteredSessions = computed(() => {
-  const all = [...sessions.value]
+  const all = [...safeSessions.value]
 
   if (activeTab.value === 'week') {
     return all.filter((session) => session.dateObj && isInCurrentWeek(session.dateObj))
@@ -253,24 +308,7 @@ const filteredSessions = computed(() => {
 })
 
 const kpi = computed(() => {
-  const total = filteredSessions.value.length
-  const completed = filteredSessions.value.filter((session) => session.statusKey === 'completed').length
-  const dropped = filteredSessions.value.filter((session) => session.statusKey === 'stopped').length
-  const durationValues = filteredSessions.value
-    .map((session) => session.durationMs)
-    .filter((value) => typeof value === 'number' && value >= 0)
-
-  const avgDuration = durationValues.length
-    ? Math.round(durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length)
-    : 0
-
-  return {
-    totalSessions: total,
-    completedPct: total ? Math.round((completed / total) * 100) : 0,
-    dropoffPct: total ? Math.round((dropped / total) * 100) : 0,
-    avgDuration,
-    avgDurationLabel: formatDuration(avgDuration),
-  }
+  return calculateSessionSummary(filteredSessions.value)
 })
 
 const dropoffMeta = computed(() => {
@@ -282,43 +320,19 @@ const dropoffMeta = computed(() => {
 })
 
 const warningText = computed(() => {
-  if (!filteredSessions.value.length) {
+  if (!scenarioSessions.value.length) {
     return 'Geen sessiedata beschikbaar voor dit scenario'
   }
 
-  if (kpi.value.dropoffPct >= 50) {
-    return `Afhaak ligt op ${kpi.value.dropoffPct}% voor dit scenario`
+  if (scenarioKpi.value.dropoffPct >= 50) {
+    return `Afhaak ligt op ${scenarioKpi.value.dropoffPct}% voor dit scenario`
   }
 
-  return `Afhaak ligt op ${kpi.value.dropoffPct}% voor dit scenario`
+  return `Afhaak ligt op ${scenarioKpi.value.dropoffPct}% voor dit scenario`
 })
 
 const behaviorSummary = computed(() => {
-  const pathCounts = filteredSessions.value.reduce((acc, session) => {
-    const pathKey = normalizePath(session.path)
-    if (pathKey === 'A') acc.a += 1
-    if (pathKey === 'B') acc.b += 1
-    return acc
-  }, { a: 0, b: 0 })
-
-  const total = pathCounts.a + pathCounts.b
-  const aPct = total ? Math.round((pathCounts.a / total) * 100) : 0
-  const bPct = total ? Math.round((pathCounts.b / total) * 100) : 0
-
-  const mostPopularPath = bPct >= aPct ? 'B' : 'A'
-  const leastPopularPath = bPct >= aPct ? 'A' : 'B'
-  const mostPopularPct = Math.max(aPct, bPct)
-  const leastPopularPct = Math.min(aPct, bPct)
-
-  return {
-    mostPopularPath,
-    leastPopularPath,
-    mostPopularPct,
-    leastPopularPct,
-    note: total
-      ? `${mostPopularPct}% kiest pad ${mostPopularPath} in dit scenario`
-      : 'Nog geen padgegevens beschikbaar',
-  }
+  return calculateChoiceSummary(scenarioChoiceEvents.value)
 })
 
 const genders = computed(() => {
@@ -330,29 +344,29 @@ const genders = computed(() => {
   ]
 
   return defaults.map((group) => {
-    const groupSessions = filteredSessions.value.filter((session) => {
+    const groupSessions = scenarioSessions.value.filter((session) => {
       if (group.key === 'prefer') {
         return !session.gender || session.gender === 'unknown'
       }
 
-      return group.matcher.includes(session.gender)
+      return group.matcher.includes(normalizeText(session.gender))
     })
 
-    return calculatePathBreakdown(group.key, group.label, groupSessions)
+    return calculateChoiceBreakdown(group.key, group.label, groupSessions, scenarioChoiceEvents.value)
   })
 })
 
 const steps = computed(() => {
-  const analyticSteps = extractStepAnalytics(analyticsRows.value)
-  if (analyticSteps.length) return analyticSteps
-
-  const sessionSteps = deriveStepsFromSessions(filteredSessions.value)
-  if (sessionSteps.length) return sessionSteps
+  const eventSteps = deriveStepsFromEvents(scenarioChoiceEvents.value)
+  if (eventSteps.length) return eventSteps
 
   return [
-    { key: 'step-1', title: 'Stap 1', desc: 'Onbekend', padA: 0, padB: 0, drop: 0 },
+    { key: 'step-1', title: 'Stap 1', desc: 'Nog geen padgegevens beschikbaar', padA: 0, padB: 0, drop: 0 },
   ]
 })
+
+const safeGenders = computed(() => (Array.isArray(genders.value) ? genders.value : []))
+const safeSteps = computed(() => (Array.isArray(steps.value) ? steps.value : []))
 
 async function loadScenarios() {
   loadingScenarios.value = true
@@ -373,15 +387,13 @@ async function loadScenarios() {
     } else {
       selectedScenarioKey.value = ''
       sessions.value = []
-      reflections.value = []
-      analyticsRows.value = []
+      events.value = []
     }
   } catch (error) {
     scenarios.value = []
     selectedScenarioKey.value = ''
     sessions.value = []
-    reflections.value = []
-    analyticsRows.value = []
+    events.value = []
     errorMessage.value = error?.message || 'Scenario\'s konden niet worden geladen.'
   } finally {
     loadingScenarios.value = false
@@ -389,25 +401,26 @@ async function loadScenarios() {
 }
 
 async function loadScenarioData() {
-  if (!selectedScenario.value) return
-
   loadingScenarioData.value = true
   errorMessage.value = ''
 
   try {
-    const [sessionRows, reflectionRows, analyticsData] = await Promise.all([
-      loadSessionsForScenario(selectedScenario.value),
-      loadReflectionsForScenario(selectedScenario.value),
-      loadScenarioAnalytics(selectedScenario.value),
+    const [sessionRows, eventRows] = await Promise.all([
+      loadSessions(),
+      loadEvents(),
     ])
 
     sessions.value = sessionRows
-    reflections.value = reflectionRows
-    analyticsRows.value = analyticsData
+    console.log('sessions count', sessionRows.length)
+    console.log('sessions', sessionRows)
+
+    console.log('events count', eventRows.length)
+    console.log('events', eventRows)
+
+    events.value = eventRows
   } catch (error) {
     sessions.value = []
-    reflections.value = []
-    analyticsRows.value = []
+    events.value = []
     errorMessage.value = error?.message || 'Inzichten konden niet worden geladen.'
   } finally {
     loadingScenarioData.value = false
@@ -425,182 +438,67 @@ function mapScenario(record) {
   return { key: String(key), id: id || '', slug: slug || '', title }
 }
 
-async function loadSessionsForScenario(scenario) {
+async function loadSessions() {
   const { data, error } = await supabase
     .from('sessions')
-    .select('*')
+    .select('id, scenario_id, age, gender, started_at, ended_at, status')
+    .order('started_at', { ascending: false })
 
   if (error) throw error
 
   const rows = Array.isArray(data) ? data : []
 
   return rows
-    .filter((record) => recordMatchesScenario(record, scenario))
     .map((record, index) => mapSession(record, index))
     .sort((left, right) => right.sortStamp - left.sortStamp)
 }
 
-async function loadReflectionsForScenario(scenario) {
-  const { data, error } = await safeSelectTable('reflections')
-  if (error) throw error
-
-  const rows = Array.isArray(data) ? data : []
-  return rows
-    .filter((record) => recordMatchesScenario(record, scenario))
-    .map((record, index) => mapReflection(record, index))
-}
-
-async function loadScenarioAnalytics(scenario) {
-  const { data, error } = await safeSelectTable('scenario_analytics')
-  if (error) throw error
-
-  const rows = Array.isArray(data) ? data : []
-  return rows.filter((record) => recordMatchesScenario(record, scenario))
-}
-
-async function safeSelectTable(tableName) {
+async function loadEvents() {
   const { data, error } = await supabase
-    .from(tableName)
-    .select('*')
+    .from('events')
+    .select('id, session_id, step_id, type, value, created_at')
+    .order('created_at', { ascending: true })
 
-  if (error) {
-    const message = String(error.message || '').toLowerCase()
-    if (message.includes('does not exist') || message.includes('could not find')) {
-      return { data: [], error: null }
-    }
-  }
+  if (error) throw error
 
-  return { data, error }
-}
-
-function recordMatchesScenario(record, scenario) {
-  const recordIdValues = collectRecordValues(record, [
-    'scenario_id',
-    'scenarioId',
-    'id_scenario',
-  ])
-
-  // Prefer strict id matching whenever an id-like field exists on the record.
-  if (recordIdValues.length) {
-    if (!scenario.id) return false
-
-    return recordIdValues.some((value) => String(value) === String(scenario.id))
-  }
-
-  const recordSlugValues = collectRecordValues(record, [
-    'scenario_slug',
-    'slug',
-  ])
-
-  // If slug-like fields are present, match strictly on slug.
-  if (recordSlugValues.length) {
-    if (!scenario.slug) return false
-
-    return recordSlugValues.some((value) => normalizeText(value) === normalizeText(scenario.slug))
-  }
-
-  // Last fallback only when no scenario id/slug fields are available.
-  const recordTitleValues = collectRecordValues(record, [
-    'scenario_title',
-    'scenario',
-    'title',
-    'scenario_name',
-  ])
-
-  return recordTitleValues.some((value) => normalizeText(value) === normalizeText(scenario.title))
-}
-
-function collectRecordValues(record, keys) {
-  const values = []
-
-  for (const key of keys) {
-    const raw = record?.[key]
-
-    if (typeof raw === 'string' && raw.trim()) {
-      values.push(raw.trim())
-      continue
-    }
-
-    if (typeof raw === 'number' && !Number.isNaN(raw)) {
-      values.push(String(raw))
-    }
-  }
-
-  return values
+  return Array.isArray(data) ? data : []
 }
 
 function mapSession(record, index) {
-  const rawId = getFirstString(record, ['id', 'session_id', 'sessionId', 'uuid']) || `session-${index + 1}`
-  const startDate = getFirstDate(record, ['started_at', 'start_at', 'start_time', 'created_at'])
-  const endDate = getFirstDate(record, ['ended_at', 'end_at', 'end_time', 'updated_at'])
-  const dateObj = startDate || endDate || getFirstDate(record, ['created_at'])
-  const statusKey = normalizeStatusKey(getFirstString(record, ['status', 'state']))
-  const path = getFirstString(record, ['path', 'selected_path', 'decision_path', 'result_path', 'choice'])
-  const gender = normalizeGender(getFirstString(record, ['gender', 'user_gender', 'sex']))
+  const id = getFirstString(record, ['id']) || `session-${index + 1}`
+  const scenarioId = getFirstString(record, ['scenario_id'])
+  const startDate = getFirstDate(record, ['started_at'])
+  const endDate = getFirstDate(record, ['ended_at'])
+  const dateObj = startDate || endDate
+  const status = getFirstString(record, ['status'])
+  const statusKey = normalizeStatusKey(status)
+  const gender = normalizeGender(getFirstString(record, ['gender']))
 
   return {
-    id: shortenId(rawId),
-    statusKey,
-    path,
+    id,
+    shortId: shortenId(id),
+    scenario_id: scenarioId,
+    age: getFirstNumber(record, ['age']) ?? 'Onbekend',
     gender,
+    started_at: startDate,
+    ended_at: endDate,
+    status,
+    statusKey,
     dateObj,
-    durationMs: getDurationFromRecord(record, startDate, endDate),
-    durationMinutes: getDurationFromRecord(record, startDate, endDate) / 60000,
-    step: getFirstString(record, ['step', 'current_step', 'session_step', 'stage']),
+    durationMs: getDurationFromDates(startDate, endDate),
     date: formatDate(dateObj),
     sortStamp: dateObj?.getTime?.() || 0,
   }
 }
 
-function mapReflection(record, index) {
-  const rawDate = getFirstDate(record, ['created_at', 'date', 'reflection_date', 'submitted_at'])
-
-  return {
-    id: getFirstString(record, ['user_id', 'id', 'reflection_id']) || `r-${index + 1}`,
-    date: formatDate(rawDate),
-    age: getFirstNumber(record, ['age', 'user_age']) ?? 'Onbekend',
-    gender: getFirstString(record, ['gender', 'user_gender']) || 'Onbekend',
-    text: getFirstString(record, ['text', 'reflection', 'content', 'message']) || 'Onbekend',
-  }
-}
-
-function extractStepAnalytics(rows) {
-  if (!rows.length) return []
-
-  const source = rows[0]
-  const candidates = [source?.step_analytics, source?.steps, source?.dropoff_steps]
-
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) continue
-
-    const mapped = candidate.map((item, index) => {
-      const title = getFirstString(item, ['title', 'label', 'step']) || `Stap ${index + 1}`
-      const desc = getFirstString(item, ['desc', 'description']) || 'Onbekend'
-      const padA = clampPercent(getFirstNumber(item, ['pad_a', 'path_a', 'a', 'padA']) ?? 0)
-      const padB = clampPercent(getFirstNumber(item, ['pad_b', 'path_b', 'b', 'padB']) ?? 0)
-      const drop = clampPercent(getFirstNumber(item, ['drop', 'dropoff', 'afhaak']) ?? 0)
-
-      return {
-        key: `step-analytics-${index}`,
-        title,
-        desc,
-        padA,
-        padB,
-        drop,
-      }
-    })
-
-    if (mapped.length) return mapped
-  }
-
-  return []
-}
-
-function deriveStepsFromSessions(sessionRows) {
+function deriveStepsFromEvents(eventRows) {
   const groups = new Map()
 
-  for (const session of sessionRows) {
-    const rawStep = session.step
+  for (const event of eventRows) {
+    const type = normalizeText(event?.type)
+    if (!type || type === 'reflection') continue
+
+    const rawStep = getFirstString(event, ['step_id', 'stepId'])
     if (!rawStep) continue
 
     const key = String(rawStep)
@@ -611,10 +509,10 @@ function deriveStepsFromSessions(sessionRows) {
     const group = groups.get(key)
     group.total += 1
 
-    const path = normalizePath(session.path)
-    if (path === 'A') group.a += 1
-    if (path === 'B') group.b += 1
-    if (session.statusKey === 'stopped') group.drop += 1
+    const normalizedValue = extractChoiceSide(getFirstString(event, ['value', 'answer', 'choice', 'selected_choice']))
+    if (normalizedValue === 'A') group.a += 1
+    if (normalizedValue === 'B') group.b += 1
+    if (type === 'dropoff' || type === 'stopped' || type === 'drop') group.drop += 1
   }
 
   const entries = Array.from(groups.entries())
@@ -623,7 +521,7 @@ function deriveStepsFromSessions(sessionRows) {
   return entries.map(([stepKey, value], index) => {
     const total = value.total || 1
     return {
-      key: `step-session-${stepKey}`,
+      key: `step-event-${stepKey}`,
       title: `Stap ${index + 1}`,
       desc: String(stepKey),
       padA: Math.round((value.a / total) * 100),
@@ -633,26 +531,121 @@ function deriveStepsFromSessions(sessionRows) {
   })
 }
 
-function calculatePathBreakdown(key, label, sessionRows) {
+function calculateChoiceBreakdown(key, label, sessionRows, choiceEvents) {
   const total = sessionRows.length
-  const aCount = sessionRows.filter((session) => normalizePath(session.path) === 'A').length
-  const bCount = sessionRows.filter((session) => normalizePath(session.path) === 'B').length
-  const dropCount = sessionRows.filter((session) => session.statusKey === 'stopped').length
+  const sessionIds = new Set(sessionRows.map((session) => String(session.id)))
+  const choiceBySession = buildChoiceSideBySession(choiceEvents, sessionIds)
+
+  let aCount = 0
+  let bCount = 0
+  let dropCount = 0
+
+  for (const session of sessionRows) {
+    const statusKey = normalizeStatusKey(session.status)
+
+    if (statusKey === 'stopped') {
+      dropCount += 1
+      continue
+    }
+
+    const chosenSide = choiceBySession.get(String(session.id))
+    if (chosenSide === 'A') {
+      aCount += 1
+    } else if (chosenSide === 'B') {
+      bCount += 1
+    }
+  }
 
   return {
     key,
     label,
-    padA: total ? Math.round((aCount / total) * 100) : 0,
-    padB: total ? Math.round((bCount / total) * 100) : 0,
-    drop: total ? Math.round((dropCount / total) * 100) : 0,
+    padA: clampPercent(total ? Math.round((aCount / total) * 100) : 0),
+    padB: clampPercent(total ? Math.round((bCount / total) * 100) : 0),
+    drop: clampPercent(total ? Math.round((dropCount / total) * 100) : 0),
   }
 }
 
-function normalizePath(path) {
-  const value = normalizeText(path)
-  if (!value) return ''
-  if (value === 'a' || value.includes('pad a') || value.includes('path a')) return 'A'
-  if (value === 'b' || value.includes('pad b') || value.includes('path b')) return 'B'
+function buildChoiceSideBySession(choiceEvents, sessionIds) {
+  const choiceBySession = new Map()
+
+  for (const event of choiceEvents) {
+    const sessionId = String(event?.session_id || '')
+    if (!sessionId || !sessionIds.has(sessionId) || choiceBySession.has(sessionId)) continue
+
+    const side = extractChoiceSide(getFirstString(event, ['value', 'answer', 'choice', 'selected_choice', 'step_id']))
+    if (side) {
+      choiceBySession.set(sessionId, side)
+    }
+  }
+
+  return choiceBySession
+}
+
+function calculateSessionSummary(sessionRows) {
+  const total = sessionRows.length
+  const completed = sessionRows.filter((session) => normalizeStatusKey(session.status) === 'completed').length
+  const dropped = sessionRows.filter((session) => normalizeStatusKey(session.status) === 'stopped').length
+  const durationValues = sessionRows
+    .map((session) => session.durationMs)
+    .filter((value) => typeof value === 'number' && value >= 0)
+
+  const avgDuration = durationValues.length
+    ? Math.round(durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length)
+    : 0
+
+  return {
+    totalSessions: total,
+    completedPct: total ? Math.round((completed / total) * 100) : 0,
+    dropoffPct: total ? Math.round((dropped / total) * 100) : 0,
+    avgDuration,
+    avgDurationLabel: formatDuration(avgDuration),
+  }
+}
+
+function calculateChoiceSummary(choiceEvents) {
+  const counts = choiceEvents.reduce((acc, event) => {
+    const side = extractChoiceSide(getFirstString(event, ['value', 'step_id']))
+    if (side === 'A') acc.a += 1
+    if (side === 'B') acc.b += 1
+    return acc
+  }, { a: 0, b: 0 })
+
+  const total = counts.a + counts.b
+
+  if (!total) {
+    return {
+      mostPopularPath: '-',
+      leastPopularPath: '-',
+      mostPopularPct: 0,
+      leastPopularPct: 0,
+      note: 'Nog geen padgegevens beschikbaar',
+    }
+  }
+
+  const aPct = Math.round((counts.a / total) * 100)
+  const bPct = Math.round((counts.b / total) * 100)
+  const mostPopularPath = bPct >= aPct ? 'B' : 'A'
+  const leastPopularPath = bPct >= aPct ? 'A' : 'B'
+
+  return {
+    mostPopularPath,
+    leastPopularPath,
+    mostPopularPct: Math.max(aPct, bPct),
+    leastPopularPct: Math.min(aPct, bPct),
+    note: `${Math.max(aPct, bPct)}% kiest pad ${mostPopularPath} in dit scenario`,
+  }
+}
+
+function extractChoiceSide(value) {
+  const text = normalizeText(value)
+  if (!text) return ''
+
+  const aMatches = ['a', 'pad a', 'path a', 'choice a', 'option a', 'antwoord a']
+  const bMatches = ['b', 'pad b', 'path b', 'choice b', 'option b', 'antwoord b']
+
+  if (aMatches.some((item) => text === item || text.includes(item))) return 'A'
+  if (bMatches.some((item) => text === item || text.includes(item))) return 'B'
+
   return ''
 }
 
@@ -680,16 +673,15 @@ function normalizeText(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+function getDurationFromDates(startDate, endDate) {
+  if (!startDate || !endDate) return 0
+
+  const diff = endDate.getTime() - startDate.getTime()
+  return diff > 0 ? diff : 0
+}
+
 function getDurationFromRecord(record, startDate, endDate) {
-  const directDurationMs = getFirstNumber(record, ['duration_seconds', 'duration', 'session_duration'])
-  if (typeof directDurationMs === 'number' && directDurationMs > 0) return directDurationMs
-
-  if (startDate && endDate) {
-    const diff = endDate.getTime() - startDate.getTime()
-    if (diff > 0) return diff
-  }
-
-  return 0
+  return getDurationFromDates(startDate, endDate)
 }
 
 function getFirstString(source, keys) {
