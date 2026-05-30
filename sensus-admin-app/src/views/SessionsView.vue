@@ -335,6 +335,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import Drawer from '@/components/Drawer.vue'
 import { supabase } from '@/services/supabase'
+import { formatDate as formatDateInBrussels } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
 import { mapStepsForLoad } from '@/utils/scenarioStepModel'
 
@@ -696,13 +697,7 @@ function mapSessionRecord(record, index) {
 function formatTimelineTime(date) {
   if (!date) return ''
 
-  return new Intl.DateTimeFormat('nl-NL', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date)
+  return formatDateInBrussels(date)
 }
 
 function getScenarioTitle(scenario) {
@@ -795,12 +790,12 @@ function getOfflineState(record) {
 
 function formatDate(date) {
   if (!date) return 'Onbekende datum'
-  return new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' }).format(date)
+  return formatDateInBrussels(date)
 }
 
 function formatTime(date) {
   if (!date) return '--:--'
-  return new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
+  return formatDateInBrussels(date)
 }
 
 function calculateDurationMs(startDate, endDate) {

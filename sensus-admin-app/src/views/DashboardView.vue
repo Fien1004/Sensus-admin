@@ -113,6 +113,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { supabase } from '@/services/supabase'
+import { formatDate } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
 
 const loading = ref(true)
@@ -123,12 +124,6 @@ const events = ref([])
 
 let sessionsChannel = null
 let eventsChannel = null
-
-const dateFormatter = new Intl.DateTimeFormat('nl-NL', {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-})
 
 onMounted(() => {
   setupRealtimeSubscriptions()
@@ -371,7 +366,7 @@ function getSessionDate(session) {
     getSessionTimeline(session)?.last ||
     null
 
-  return date ? dateFormatter.format(date) : 'Onbekend'
+  return formatDate(date)
 }
 
 function getSessionDurationMs(session) {

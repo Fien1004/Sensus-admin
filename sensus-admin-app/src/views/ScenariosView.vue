@@ -199,6 +199,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
+import { formatDate } from '@/utils/dateFormatter'
 
 const normalizeText = (value) => {
   return String(value || '')
@@ -227,12 +228,6 @@ const confirmModal = ref({
 })
 const router = useRouter()
 let toastTimeoutId = null
-
-const dateFormatter = new Intl.DateTimeFormat('nl-NL', {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-})
 
 onMounted(() => {
   void loadScenarios()
@@ -342,15 +337,7 @@ function getSortStamp(record) {
 }
 
 function formatDateValue(value) {
-  if (!value) return 'Onbekende datum'
-
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return dateFormatter.format(date)
+  return formatDate(value)
 }
 
 function getScenarioStatus(record) {

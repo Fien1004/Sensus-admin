@@ -217,6 +217,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { supabase } from '@/services/supabase'
+import { formatDate as formatDateInBrussels } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
 
 const tabs = [
@@ -277,7 +278,7 @@ const reflections = computed(() => {
     return {
       key: getFirstString(event, ['id']) || `${sessionId}-${index}`,
       id: shortenId(sessionId),
-      date: formatDate(getFirstDate(event, ['created_at'])),
+      date: formatDateInBrussels(getFirstDate(event, ['created_at'])),
       age: session?.age ?? 'Onbekend',
       gender: session?.gender || 'Onbekend',
       text: getFirstString(event, ['value']) || 'Onbekend',
@@ -486,7 +487,7 @@ function mapSession(record, index) {
     statusKey,
     dateObj,
     durationMs: getDurationFromDates(startDate, endDate),
-    date: formatDate(dateObj),
+    date: formatDateInBrussels(dateObj),
     sortStamp: dateObj?.getTime?.() || 0,
   }
 }
@@ -724,16 +725,6 @@ function shortenId(value) {
   const text = String(value)
   if (text.length <= 10) return text
   return text.slice(0, 10)
-}
-
-function formatDate(date) {
-  if (!date) return 'Onbekend'
-
-  return new Intl.DateTimeFormat('nl-NL', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(date)
 }
 
 function isInCurrentWeek(date) {
