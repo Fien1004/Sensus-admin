@@ -412,6 +412,7 @@
 import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
+import { useNotificationsStore } from '@/stores/notifications'
 import ChatScenarioPreview from '@/components/ChatScenarioPreview.vue'
 import NarrativeScenarioPreview from '@/components/NarrativeScenarioPreview.vue'
 import trashIcon from '@/assets/icons/trash.svg'
@@ -419,6 +420,7 @@ import { createQuestionStep as createScenarioQuestionStep, createReflectionStep,
 
 const route = useRoute()
 const router = useRouter()
+const notificationsStore = useNotificationsStore()
 
 const scenarioId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''))
 const isEditMode = computed(() => route.name === 'ScenarioEdit' || route.path.includes('/edit'))
@@ -1012,6 +1014,11 @@ async function handleSave(status = 'draft') {
     if (error) {
       throw error
     }
+
+    await notificationsStore.addNotification({
+      type: 'scenario_updated',
+      message: `Scenario bijgewerkt: ${payload.title}`,
+    })
 
     saveSuccess.value = isPublished ? 'Scenario gepubliceerd' : 'Scenario opgeslagen als concept'
   } catch (error) {

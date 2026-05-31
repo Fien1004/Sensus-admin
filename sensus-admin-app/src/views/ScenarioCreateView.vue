@@ -392,12 +392,14 @@
 import { computed, ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
+import { useNotificationsStore } from '@/stores/notifications'
 import ChatScenarioPreview from '@/components/ChatScenarioPreview.vue'
 import NarrativeScenarioPreview from '@/components/NarrativeScenarioPreview.vue'
 import trashIcon from '@/assets/icons/trash.svg'
 import { createQuestionStep, createReflectionStep, createEndStep, getNextReflectionId, getNextEndId, getStepIdsFromSteps, mapStepsForSave, mapReflectionStepForSave, mapEndStepForSave } from '@/utils/scenarioStepModel'
 
 const router = useRouter()
+const notificationsStore = useNotificationsStore()
 
 // Local editor state (used to avoid relying on a missing composable)
 const scenario = reactive({
@@ -797,6 +799,7 @@ async function handleSave(status = 'draft') {
   const payload = buildScenarioPayload()
   const isPublished = status === 'published'
   const now = new Date().toISOString()
+  const isUpdatingExistingScenario = Boolean(savedScenarioId.value)
 
   try {
     const scenarioSlug = slugify(payload.title)
@@ -845,6 +848,13 @@ async function handleSave(status = 'draft') {
     if (data?.id) {
       savedScenarioId.value = data.id
     }
+
+    await notificationsStore.addNotification({
+      type: isUpdatingExistingScenario ? 'scenario_updated' : 'scenario_created',
+      message: isUpdatingExistingScenario
+        ? `Scenario bijgewerkt: ${payload.title}`
+        : `Nieuw scenario aangemaakt: ${payload.title}`,
+    })
 
     saveSuccess.value = status === 'published' ? 'Scenario gepubliceerd' : 'Scenario opgeslagen als concept'
   } catch (error) {
