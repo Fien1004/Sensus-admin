@@ -90,9 +90,42 @@
 
         <article class="card insights-card">
           <header class="card-header">
-            <h2 class="card-title">Inzichten</h2>
+            <h2 class="card-title">Belangrijkste inzichten deze week</h2>
           </header>
-          <p class="insights-placeholder">Inzichten worden hier later toegevoegd.</p>
+
+          <div v-if="insightsLoading" class="insights-state" aria-live="polite">
+            <p class="insights-state-title">Inzichten berekenen...</p>
+            <p class="insights-state-text">De sessiedata van de afgelopen 7 dagen wordt geanalyseerd.</p>
+          </div>
+
+          <div v-else-if="insightsError" class="insights-state insights-state-error" aria-live="assertive">
+            <p class="insights-state-title">Inzichten konden niet worden geladen.</p>
+            <p class="insights-state-text">{{ insightsError }}</p>
+            <button type="button" class="retry-button retry-button--compact" @click="loadDashboard">Opnieuw laden</button>
+          </div>
+
+          <template v-else-if="dashboardInsights.length">
+            <ul class="insights-list">
+              <li v-for="insight in dashboardInsights" :key="insight.id" class="insight-item">
+                <span class="insight-icon" :class="`insight-icon--${insight.icon}`" aria-hidden="true">
+                  <component :is="insightIconMap[insight.icon]" class="insight-icon-svg" :stroke-width="2.1" />
+                </span>
+                <div class="insight-body">
+                  <p class="insight-title">{{ insight.title }}</p>
+                  <p class="insight-text">{{ insight.text }}</p>
+                </div>
+              </li>
+            </ul>
+
+            <p v-if="insightsLastUpdated" class="insights-updated">
+              Laatst bijgewerkt: {{ formatDate(insightsLastUpdated) }}
+            </p>
+          </template>
+
+          <div v-else class="insights-state insights-state-empty">
+            <p class="insights-state-title">Nog geen inzichten beschikbaar</p>
+            <p class="insights-state-text">{{ insightsFallbackMessage }}</p>
+          </div>
         </article>
 
         <article class="card quick-actions-card">
@@ -127,11 +160,29 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { AlertTriangle, CheckCircle, Clock3, MessageSquare, Trophy } from 'lucide-vue-next'
 import { supabase } from '@/services/supabase'
 import { formatDate } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
+import { useDashboardInsights } from '@/composables/useDashboardInsights'
 
 const router = useRouter()
+const insightIconMap = {
+  'message-square': MessageSquare,
+  'clock-3': Clock3,
+  'alert-triangle': AlertTriangle,
+  trophy: Trophy,
+  'check-circle': CheckCircle,
+}
+const {
+  insights: dashboardInsights,
+  isLoading: insightsLoading,
+  errorMessage: insightsError,
+  fallbackMessage: insightsFallbackMessage,
+  lastUpdated: insightsLastUpdated,
+  loadDashboardInsights,
+  clearDashboardInsights,
+} = useDashboardInsights()
 
 const loading = ref(true)
 const errorMessage = ref('')
@@ -181,6 +232,12 @@ async function loadDashboard(options = {}) {
     events.value = Array.isArray(eventsResult.data) ? eventsResult.data : []
     scenarios.value = Array.isArray(scenariosResult.data) ? scenariosResult.data : []
 
+    await loadDashboardInsights({
+      sessions: sessions.value,
+      events: events.value,
+      scenarios: scenarios.value,
+    })
+
     const secondaryError = [eventsResult.error, scenariosResult.error].find(Boolean)
     if (secondaryError) {
       errorMessage.value = secondaryError.message || 'Niet alle dashboarddata kon worden geladen.'
@@ -190,6 +247,7 @@ async function loadDashboard(options = {}) {
     sessions.value = []
     scenarios.value = []
     events.value = []
+    clearDashboardInsights()
     errorMessage.value = error?.message || 'Dashboard data kon niet worden geladen.'
   } finally {
     if (!silent) {
@@ -780,7 +838,7 @@ function isCompletedSession(session) {
 }
 
 .insights-card {
-  min-height: 150px;
+  min-height: 220px;
 }
 
 .quick-actions-card {
@@ -937,10 +995,153 @@ function isCompletedSession(session) {
   font-size: var(--text-md);
 }
 
-.insights-placeholder {
+.insights-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.insight-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.insight-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.insight-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(84, 99, 107, 0.08);
+  color: var(--color-secondary-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  transition: background-color 160ms ease;
+}
+
+.insight-icon--message-square {
+  background: rgba(165, 10, 126, 0.1);
+  color: #a50a7e;
+}
+
+.insight-icon--message-square:hover {
+  background: rgba(165, 10, 126, 0.16);
+}
+
+.insight-icon--clock-3 {
+  background: rgba(6, 70, 96, 0.1);
+  color: #064660;
+}
+
+.insight-icon--clock-3:hover {
+  background: rgba(6, 70, 96, 0.16);
+}
+
+.insight-icon--alert-triangle {
+  background: rgba(242, 140, 40, 0.12);
+  color: #f28c28;
+}
+
+.insight-icon--alert-triangle:hover {
+  background: rgba(242, 140, 40, 0.18);
+}
+
+.insight-icon--trophy {
+  background: rgba(200, 162, 0, 0.14);
+  color: #c8a200;
+}
+
+.insight-icon--trophy:hover {
+  background: rgba(200, 162, 0, 0.2);
+}
+
+.insight-icon--check-circle {
+  background: rgba(32, 160, 90, 0.1);
+  color: #20a05a;
+}
+
+.insight-icon--check-circle:hover {
+  background: rgba(32, 160, 90, 0.16);
+}
+
+.insight-icon-svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.insight-body {
+  min-width: 0;
+}
+
+.insight-title {
+  margin: 0 0 4px;
+  color: var(--color-neutral-900);
+  font-size: var(--text-md);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.insight-text {
+  margin: 0;
+  color: var(--color-neutral-800);
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.insights-state {
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+
+.insights-state-empty {
+  align-items: flex-start;
+}
+
+.insights-state-error {
+  align-items: flex-start;
+}
+
+.insights-state-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--color-neutral-900);
+}
+
+.insights-state-text {
   margin: 0;
   color: var(--color-text-soft);
   font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+.retry-button--compact {
+  margin-top: var(--space-1);
+  padding: 10px 14px;
+  font-size: var(--text-sm);
+}
+
+.insights-updated {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-soft);
+  font-size: var(--text-sm);
+  line-height: 1.4;
 }
 
 .empty-state {
