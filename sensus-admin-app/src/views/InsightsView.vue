@@ -179,38 +179,7 @@
       </div>
     </section>
 
-    <section class="card drop-per-step">
-      <h3 class="section-title">Afhaak per stap</h3>
-
-      <div class="steps-outer">
-        <div class="step-row" v-for="step in safeSteps" :key="step.key">
-          <div class="step-left">
-            <div class="step-title">{{ step.title }}</div>
-            <div class="step-desc">{{ step.desc }}</div>
-          </div>
-
-          <div class="step-center">
-            <div class="bar-row">
-              <div class="bar-wrap">
-                <div class="bar-a" :style="{ width: step.padA + '%' }"><span class="bar-text">Pad A</span></div>
-              </div>
-              <div class="bar-percent">{{ step.padA }}%</div>
-            </div>
-
-            <div class="bar-row">
-              <div class="bar-wrap">
-                <div class="bar-b" :style="{ width: step.padB + '%' }"><span class="bar-text">Pad B</span></div>
-              </div>
-              <div class="bar-percent">{{ step.padB }}%</div>
-            </div>
-          </div>
-
-          <div class="step-right">
-            <div class="drop-card">Afhaak<br>{{ step.drop }}%</div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <!-- 'Afhaak per stap' section removed as requested -->
   </main>
 </template>
 
