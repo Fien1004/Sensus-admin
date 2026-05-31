@@ -186,12 +186,9 @@
       </div>
 
       <footer class="pagination">
-        <div></div>
-        <div>
-          <button type="button" class="pagination-button" :disabled="isPreviousDisabled" @click="goToPreviousPage">‹ Vorige</button>
-          <span class="pagination-divider"></span>
-          <button type="button" class="pagination-button" :disabled="isNextDisabled" @click="goToNextPage">Volgende ›</button>
-        </div>
+        <button type="button" class="pagination-button" :disabled="isPreviousDisabled" @click="goToPreviousPage">‹ Vorige</button>
+        <span class="pagination-divider"></span>
+        <button type="button" class="pagination-button" :disabled="isNextDisabled" @click="goToNextPage">Volgende ›</button>
       </footer>
     </section>
 
@@ -1883,10 +1880,10 @@ function normalizeEngineJson(value) {
 .pagination {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   padding-top: 10px;
-  color: #6b7280;
+  color: var(--color-text-soft);
 }
 
 .pagination-button {
@@ -1894,10 +1891,15 @@ function normalizeEngineJson(value) {
   background: transparent;
   color: inherit;
   font-family: var(--font-family-base);
-  font-size: 16px;
+  font-size: var(--text-md);
   font-weight: 600;
   cursor: pointer;
   padding: 4px 0;
+  transition: color 160ms ease;
+}
+
+.pagination-button:hover:not(:disabled) {
+  color: var(--color-neutral-900);
 }
 
 .pagination-button:disabled {
