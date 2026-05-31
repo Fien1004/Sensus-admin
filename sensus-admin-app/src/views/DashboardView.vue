@@ -101,8 +101,22 @@
           </header>
 
           <div class="quick-actions">
-            <button type="button" class="action-button action-button-primary">+ Nieuw scenario maken</button>
-            <button type="button" class="action-button action-button-secondary">◫ Scenario beheren</button>
+            <button
+              type="button"
+              class="action-button action-button-primary"
+              aria-label="Nieuw scenario maken"
+              @click="goToCreateScenario"
+            >
+              + Nieuw scenario maken
+            </button>
+            <button
+              type="button"
+              class="action-button action-button-secondary"
+              aria-label="Scenario beheren"
+              @click="goToScenarios"
+            >
+              ◫ Scenario beheren
+            </button>
           </div>
         </article>
       </section>
@@ -112,9 +126,12 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
 import { formatDate } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
+
+const router = useRouter()
 
 const loading = ref(true)
 const errorMessage = ref('')
@@ -133,6 +150,14 @@ onMounted(() => {
 onUnmounted(() => {
   cleanupRealtimeSubscriptions()
 })
+
+function goToCreateScenario() {
+  void router.push('/scenarios/new')
+}
+
+function goToScenarios() {
+  void router.push('/scenarios')
+}
 
 async function loadDashboard(options = {}) {
   const silent = Boolean(options.silent)
