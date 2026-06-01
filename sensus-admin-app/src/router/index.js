@@ -11,6 +11,7 @@ import SessionsView from '@/views/SessionsView.vue'
 import UsersView from '@/views/UsersView.vue'
 import InsightsView from '@/views/InsightsView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import SettingsPasswordView from '@/views/SettingsPasswordView.vue'
 import LoginView from '@/views/LoginView.vue'
 import RegisterView from '@/views/RegisterView.vue'
 
@@ -66,6 +67,10 @@ const router = createRouter({
         {
           path: 'settings',
           component: SettingsView,
+        },
+        {
+          path: 'settings/password',
+          component: SettingsPasswordView,
         },
       ],
     },

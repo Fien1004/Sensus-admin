@@ -47,6 +47,7 @@
         <label class="select-field">
           <span class="sr-only">Scenario</span>
           <select class="select-input" v-model="selectedScenarioKey" :disabled="loadingScenarios">
+            <option value="all">Alle scenario's</option>
             <option v-if="!safeScenarios.length" value="">Geen scenario's beschikbaar</option>
             <option v-for="scenario in safeScenarios" :key="scenario.key" :value="scenario.key">
               Scenario: {{ scenario.title }}
@@ -127,8 +128,8 @@
               <td colspan="5" class="reflection-text">Reflecties laden...</td>
             </tr>
           </tbody>
-          <tbody v-else-if="safeReflections.length">
-            <tr v-for="r in safeReflections" :key="r.key" class="reflection-row">
+          <tbody v-else-if="pagedReflections.length">
+            <tr v-for="r in pagedReflections" :key="r.key" class="reflection-row">
               <td>{{ r.id }}</td>
               <td>{{ r.date }}</td>
               <td>{{ r.age }}</td>
@@ -145,9 +146,9 @@
       </div>
 
       <footer class="pagination">
-        <button class="pagination-button">‹ Vorige</button>
+        <button class="pagination-button" @click="goToPreviousReflectionsPage">‹ Vorige</button>
         <span class="pagination-divider"></span>
-        <button class="pagination-button">Volgende ›</button>
+        <button class="pagination-button" @click="goToNextReflectionsPage">Volgende ›</button>
       </footer>
     </section>
 
@@ -179,38 +180,7 @@
       </div>
     </section>
 
-    <section class="card drop-per-step">
-      <h3 class="section-title">Afhaak per stap</h3>
-
-      <div class="steps-outer">
-        <div class="step-row" v-for="step in safeSteps" :key="step.key">
-          <div class="step-left">
-            <div class="step-title">{{ step.title }}</div>
-            <div class="step-desc">{{ step.desc }}</div>
-          </div>
-
-          <div class="step-center">
-            <div class="bar-row">
-              <div class="bar-wrap">
-                <div class="bar-a" :style="{ width: step.padA + '%' }"><span class="bar-text">Pad A</span></div>
-              </div>
-              <div class="bar-percent">{{ step.padA }}%</div>
-            </div>
-
-            <div class="bar-row">
-              <div class="bar-wrap">
-                <div class="bar-b" :style="{ width: step.padB + '%' }"><span class="bar-text">Pad B</span></div>
-              </div>
-              <div class="bar-percent">{{ step.padB }}%</div>
-            </div>
-          </div>
-
-          <div class="step-right">
-            <div class="drop-card">Afhaak<br>{{ step.drop }}%</div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <!-- 'Afhaak per stap' section removed as requested -->
   </main>
 </template>
 
@@ -231,10 +201,14 @@ const loadingScenarios = ref(true)
 const loadingScenarioData = ref(false)
 const errorMessage = ref('')
 const scenarios = ref([])
-const selectedScenarioKey = ref('')
+const selectedScenarioKey = ref('all')
 const sessions = ref([])
 const events = ref([])
 const selectedScenario = computed(() => {
+  if (selectedScenarioKey.value === 'all') {
+    return { key: 'all', id: '', slug: '', title: "Alle scenario's" }
+  }
+
   return scenarios.value.find((scenario) => scenario.key === selectedScenarioKey.value) || null
 })
 
@@ -243,12 +217,26 @@ const safeSessions = computed(() => (Array.isArray(sessions.value) ? sessions.va
 const safeEvents = computed(() => (Array.isArray(events.value) ? events.value : []))
 const safeReflections = computed(() => (Array.isArray(reflections.value) ? reflections.value : []))
 
-const selectedScenarioSlug = computed(() => normalizeText(selectedScenario.value?.slug))
+const selectedScenarioIdentifiers = computed(() => {
+  if (selectedScenarioKey.value === 'all' || !selectedScenario.value) {
+    return []
+  }
+
+  return [selectedScenario.value.id, selectedScenario.value.slug, selectedScenario.value.key]
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+})
 
 const scenarioSessions = computed(() => {
-  if (!selectedScenarioSlug.value) return []
+  if (selectedScenarioKey.value === 'all') {
+    return safeSessions.value
+  }
 
-  return safeSessions.value.filter((session) => normalizeText(session?.scenario_id) === selectedScenarioSlug.value)
+  if (!selectedScenarioIdentifiers.value.length) return []
+
+  return safeSessions.value.filter((session) => {
+    return selectedScenarioIdentifiers.value.includes(normalizeText(session?.scenario_id))
+  })
 })
 
 const scenarioSessionMap = computed(() => new Map(
@@ -288,13 +276,8 @@ const reflections = computed(() => {
 
 const scenarioKpi = computed(() => calculateSessionSummary(scenarioSessions.value))
 
-onMounted(() => {
-  void loadScenarios()
-  void loadScenarioData()
-})
-
 const filteredSessions = computed(() => {
-  const all = [...safeSessions.value]
+  const all = [...scenarioSessions.value]
 
   if (activeTab.value === 'week') {
     return all.filter((session) => session.dateObj && isInCurrentWeek(session.dateObj))
@@ -306,6 +289,20 @@ const filteredSessions = computed(() => {
   }
 
   return all
+})
+
+const reflectionsPage = ref(1)
+const reflectionsPageSize = 10
+const pagedReflections = computed(() => {
+  const start = (reflectionsPage.value - 1) * reflectionsPageSize
+  return safeReflections.value.slice(start, start + reflectionsPageSize)
+})
+
+const totalReflectionPages = computed(() => Math.max(1, Math.ceil(safeReflections.value.length / reflectionsPageSize)))
+
+onMounted(() => {
+  void loadScenarios()
+  void loadScenarioData()
 })
 
 const kpi = computed(() => {
@@ -369,6 +366,10 @@ const steps = computed(() => {
 const safeGenders = computed(() => (Array.isArray(genders.value) ? genders.value : []))
 const safeSteps = computed(() => (Array.isArray(steps.value) ? steps.value : []))
 
+watch([selectedScenarioKey, activeTab], () => {
+  reflectionsPage.value = 1
+})
+
 async function loadScenarios() {
   loadingScenarios.value = true
   errorMessage.value = ''
@@ -383,18 +384,10 @@ async function loadScenarios() {
     const mapped = Array.isArray(data) ? data.map(mapScenario).filter(Boolean) : []
     scenarios.value = mapped
 
-    if (mapped.length) {
-      selectedScenarioKey.value = mapped[0].key
-    } else {
-      selectedScenarioKey.value = ''
-      sessions.value = []
-      events.value = []
-    }
+    selectedScenarioKey.value = 'all'
   } catch (error) {
     scenarios.value = []
-    selectedScenarioKey.value = ''
-    sessions.value = []
-    events.value = []
+    selectedScenarioKey.value = 'all'
     errorMessage.value = error?.message || 'Scenario\'s konden niet worden geladen.'
   } finally {
     loadingScenarios.value = false
@@ -662,6 +655,14 @@ function normalizeStatusKey(status) {
   if (value === 'stopped' || value === 'gestopt') return 'stopped'
   if (value === 'active' || value === 'actief') return 'active'
   return 'unknown'
+}
+
+function goToPreviousReflectionsPage() {
+  reflectionsPage.value = Math.max(1, reflectionsPage.value - 1)
+}
+
+function goToNextReflectionsPage() {
+  reflectionsPage.value = Math.min(totalReflectionPages.value, reflectionsPage.value + 1)
 }
 
 function normalizeStepOrder(stepValue) {
