@@ -60,7 +60,18 @@
             </table>
           </div>
 
-          <div class="table-footer">All &rsaquo;</div>
+          <RouterLink to="/sessions" custom v-slot="{ navigate }">
+            <div
+              class="table-footer"
+              role="link"
+              tabindex="0"
+              @click="navigate"
+              @keydown.enter="navigate"
+              @keydown.space.prevent="navigate"
+            >
+              Alle &rsaquo;
+            </div>
+          </RouterLink>
         </article>
 
         <article class="card scenarios-card">
@@ -1022,6 +1033,7 @@ function normalizeDashboardSession(session, index) {
 .table-footer {
   padding-top: var(--space-3);
   color: var(--color-neutral-700);
+  cursor: pointer;
   font-size: var(--text-md);
 }
 
