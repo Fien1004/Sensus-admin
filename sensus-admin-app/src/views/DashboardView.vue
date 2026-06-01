@@ -71,6 +71,7 @@
           <div v-if="popularScenarios.length" class="scenario-list">
             <div class="scenario-list-head">
               <span>Scenario</span>
+              <span aria-hidden="true"></span>
               <span class="scenario-list-head-count">Sessies</span>
             </div>
             <div v-for="scenario in popularScenarios" :key="scenario.key" class="scenario-row">
@@ -866,28 +867,39 @@ function isCompletedSession(session) {
 .scenario-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 0;
 }
 
 .scenario-list-head {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(140px, 1fr) 72px;
+  grid-template-columns: 1fr 120px 48px;
   align-items: center;
-  padding: 0 0 var(--space-1);
+  gap: 16px;
+  padding: 0 0 12px;
   color: var(--color-neutral-700);
   font-size: var(--text-md);
   font-weight: 500;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .scenario-list-head-count {
+  width: 48px;
+  justify-self: end;
   text-align: right;
 }
 
 .scenario-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(140px, 1fr) 72px;
+  grid-template-columns: 1fr 120px 48px;
   align-items: center;
-  gap: var(--space-4);
+  gap: 16px;
+  min-height: 58px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.scenario-row:last-child {
+  border-bottom: none;
 }
 
 .scenario-name {
@@ -895,24 +907,22 @@ function isCompletedSession(session) {
   color: var(--color-neutral-800);
   font-weight: 500;
   min-width: 0;
-  line-height: 1.3;
+  line-height: 1.25;
   overflow: hidden;
-  line-clamp: 2;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
 }
 
 .scenario-meter {
-  display: flex;
+  display: contents;
   align-items: center;
-  gap: var(--space-4);
   min-width: 0;
 }
 
 .scenario-track {
-  flex: 1;
-  height: 8px;
+  width: 120px;
+  height: 10px;
   border-radius: var(--radius-pill);
   background: var(--color-neutral-200);
   overflow: hidden;
@@ -925,7 +935,7 @@ function isCompletedSession(session) {
 }
 
 .scenario-count {
-  min-width: 72px;
+  width: 48px;
   text-align: right;
   font-size: var(--text-md);
   font-weight: 700;
