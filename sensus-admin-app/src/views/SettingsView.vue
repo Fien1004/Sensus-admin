@@ -66,13 +66,8 @@
 
                 <div class="field password-field">
                   <label class="label">Wachtwoord</label>
-                  <div class="password-wrap">
-                    <input :type="showPassword ? 'text' : 'password'" v-model="form.password" class="input password-input" />
-                    <button type="button" class="eye-button" @click="togglePassword" :aria-pressed="showPassword" :disabled="loading">
-                      <img v-if="!showPassword" :src="EyeIcon" alt="toon" />
-                      <img v-else :src="EyeCrossedIcon" alt="verberg" />
-                    </button>
-                  </div>
+                  <div class="password-display">••••••••••</div>
+                  <RouterLink class="change-password-button" to="/settings/password">Wachtwoord wijzigen</RouterLink>
                 </div>
               </div>
             </div>
@@ -90,8 +85,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import PenIcon from '@/assets/icons/pen.svg'
-import EyeIcon from '@/assets/icons/eye.svg'
-import EyeCrossedIcon from '@/assets/icons/eye-crossed.svg'
 import { supabase } from '@/services/supabase'
 import { useAuthStore } from '@/stores/auth'
 
@@ -100,7 +93,6 @@ const saving = ref(false)
 const uploadingAvatar = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
-const showPassword = ref(false)
 const fileInput = ref(null)
 const currentUserId = ref('')
 const profileAvatarUrl = ref('')
@@ -111,7 +103,6 @@ const form = reactive({
   lastName: '',
   jobTitle: '',
   email: '',
-  password: '',
   avatarUrl: '',
   avatarFile: null,
 })
@@ -185,6 +176,7 @@ async function onFileChange(event) {
     successMessage.value = 'Profielfoto opgeslagen'
     setTimeout(() => (successMessage.value = ''), 2500)
   } catch (error) {
+    console.error('Avatar upload failed:', error)
     errorMessage.value = error?.message || 'Uploaden van profielfoto is mislukt.'
   } finally {
     uploadingAvatar.value = false
@@ -192,10 +184,6 @@ async function onFileChange(event) {
       event.target.value = ''
     }
   }
-}
-
-function togglePassword() {
-  showPassword.value = !showPassword.value
 }
 
 onMounted(() => {
@@ -237,6 +225,7 @@ async function loadSettings() {
       profileAvatarUrl.value = profile.avatar_url || ''
     }
   } catch (error) {
+    console.error('Loading settings failed:', error)
     errorMessage.value = error?.message || 'Instellingen konden niet geladen worden.'
   } finally {
     loading.value = false
@@ -301,6 +290,7 @@ async function onSave() {
     successMessage.value = 'Instellingen opgeslagen'
     setTimeout(() => (successMessage.value = ''), 2500)
   } catch (error) {
+    console.error('Saving settings failed:', error)
     errorMessage.value = error?.message || 'Opslaan mislukt. Probeer opnieuw.'
   } finally {
     saving.value = false
@@ -413,17 +403,37 @@ function getFileExtension(fileName) {
   color: var(--color-text);
 }
 
-/* Password with eye button */
-.password-wrap { position: relative; width: 320px }
-.password-input { width: 100%; padding-right: 48px }
-.eye-button {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  width:36px; height:36px; border-radius:8px; border:1px solid var(--color-border);
-  background: var(--color-surface); display:flex; align-items:center; justify-content:center; cursor:pointer
+/* Password */
+.password-display {
+  width: 320px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--font-family-base);
+  font-size: var(--text-md);
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
 }
-.eye-button svg { width:18px; height:18px }
-.eye-button img { width:18px; height:18px }
-.eye-button:disabled { opacity: 0.6; cursor: default }
+.change-password-button {
+  width: 320px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  font-family: var(--font-family-base);
+  font-size: var(--text-md);
+  font-weight: 700;
+  text-decoration: none;
+}
 
 /* Toast */
 .toast { margin-top:18px; display:inline-block; background: #e6fff0; border:1px solid rgba(33,222,74,0.12); color: var(--color-success); padding:8px 12px; border-radius:8px; font-weight:600 }
