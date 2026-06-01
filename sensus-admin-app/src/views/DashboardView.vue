@@ -409,6 +409,17 @@ const eventTimelines = computed(() => {
   return map
 })
 
+const dashboardSessions = computed(() => {
+  return [...sessions.value]
+    .map((session, index) => normalizeDashboardSession(session, index))
+    .sort((left, right) => right.sortStamp - left.sortStamp)
+})
+
+const shortenId = (id) => {
+  if (!id) return '-'
+  return String(id).slice(0, 8)
+}
+
 function getSessionRawId(session) {
   return getFirstString(session, ['id', 'session_id', 'sessionId', 'uuid'])
 }
@@ -434,30 +445,28 @@ function getSessionTimeline(session) {
 }
 
 function getSessionSortStamp(session) {
-  const date =
-    getFirstDate(session, ['started_at', 'created_at', 'date', 'updated_at', 'finished_at']) ||
-    getSessionTimeline(session)?.first ||
-    getSessionTimeline(session)?.last ||
-    null
+  const date = getDashboardSessionDate(session)
 
   return date ? date.getTime() : 0
 }
 
 function getSessionDate(session) {
-  const date =
-    getFirstDate(session, ['started_at', 'created_at', 'date', 'updated_at', 'finished_at']) ||
-    getSessionTimeline(session)?.first ||
-    getSessionTimeline(session)?.last ||
-    null
+  const date = getDashboardSessionDate(session)
 
   return formatDate(date)
 }
 
 function getSessionDurationMs(session) {
-  const directDuration = getFirstNumber(session, ['duration_seconds', 'durationSeconds', 'duration_sec', 'durationSec', 'duration_ms', 'durationMs'])
+  const directDurationMs = getFirstNumber(session, ['duration_ms', 'durationMs'])
 
-  if (directDuration !== null) {
-    return directDuration
+  if (directDurationMs !== null) {
+    return directDurationMs
+  }
+
+  const directDurationSeconds = getFirstNumber(session, ['duration_seconds', 'durationSeconds', 'duration_sec', 'durationSec'])
+
+  if (directDurationSeconds !== null) {
+    return directDurationSeconds * 1000
   }
 
   const startedAt = getFirstDate(session, ['started_at', 'created_at', 'date'])
@@ -474,17 +483,6 @@ function getSessionDurationMs(session) {
   }
 
   return 0
-}
-
-function getSessionDurationMinutes(session) {
-  const directMinutes = getFirstNumber(session, ['duration_minutes', 'durationMinutes', 'duration_mins', 'duration_min', 'length_minutes'])
-
-  if (directMinutes !== null) {
-    return directMinutes
-  }
-
-  const durationMs = getSessionDurationMs(session)
-  return durationMs !== null ? durationMs / 60000 : null
 }
 
 function formatPercent(value) {
@@ -541,17 +539,17 @@ function getSessionStatusInfo(session) {
   }
 }
 
+function getDashboardSessionDate(session) {
+  return (
+    getFirstDate(session, ['started_at', 'created_at', 'date', 'updated_at', 'finished_at']) ||
+    getSessionTimeline(session)?.first ||
+    getSessionTimeline(session)?.last ||
+    null
+  )
+}
+
 function getEventSessionKey(event) {
   return normalizeText(getFirstString(event, ['session_id', 'sessionId', 'session_uuid', 'sessionUuid']))
-}
-
-function getEventTimestamp(event) {
-  return getFirstDate(event, ['created_at', 'timestamp', 'occurred_at', 'event_at', 'date'])
-}
-
-function shortenId(id) {
-  const text = String(id)
-  return text.length > 8 ? text.slice(0, 8) : text
 }
 
 function isActiveScenario(record) {
@@ -587,21 +585,18 @@ function isActiveScenario(record) {
 }
 
 const recentSessions = computed(() => {
-  return [...sessions.value]
+  return [...dashboardSessions.value]
     .map((session, index) => {
-      const statusInfo = getSessionStatusInfo(session)
-      const rawId = getSessionRawId(session) || `sessie-${index + 1}`
-
       return {
-        key: `${rawId}-${index}`,
-        shortId: shortenId(rawId),
-        date: getSessionDate(session),
-        scenario: getSessionScenarioName(session),
-        status: statusInfo.label,
-        statusClass: statusInfo.className,
-        statusIcon: statusInfo.icon,
+        key: `${session.id}-${index}`,
+        shortId: session.shortId,
+        date: session.date,
+        scenario: session.scenario,
+        status: session.status,
+        statusClass: session.statusClass,
+        statusIcon: session.statusIcon,
         duration: formatDuration(getSessionDurationMs(session)),
-        sortStamp: getSessionSortStamp(session),
+        sortStamp: session.sortStamp,
       }
     })
     .sort((left, right) => right.sortStamp - left.sortStamp)
@@ -613,8 +608,8 @@ const popularScenarios = computed(() => {
   const knownScenarioKeys = new Set(scenarios.value.map((scenario) => normalizeText(scenario?.slug)).filter(Boolean))
   let unknownCount = 0
 
-  sessions.value.forEach((session) => {
-    const key = getSessionScenarioKey(session)
+  dashboardSessions.value.forEach((session) => {
+    const key = session.scenarioKey
 
     if (!key) {
       unknownCount += 1
@@ -669,15 +664,15 @@ const popularScenarios = computed(() => {
 })
 
 const kpiCards = computed(() => {
-  const totalSessions = sessions.value.length
+  const totalSessions = dashboardSessions.value.length
   const weekStart = getWeekStart(new Date()).getTime()
-  const sessionsThisWeek = sessions.value.filter((session) => getSessionSortStamp(session) >= weekStart).length
-  const activeScenarioCount = new Set(sessions.value.map((session) => getSessionScenarioKey(session)).filter(Boolean)).size
-  const durations = sessions.value
-    .map((session) => getSessionDurationMs(session))
-    .filter((minutes) => minutes !== null && !Number.isNaN(minutes))
+  const sessionsThisWeek = dashboardSessions.value.filter((session) => session.weekStamp >= weekStart).length
+  const activeScenarioCount = new Set(dashboardSessions.value.map((session) => session.scenarioKey).filter(Boolean)).size
+  const durations = dashboardSessions.value
+    .map((session) => session.durationMs)
+    .filter((value) => typeof value === 'number' && value >= 0)
   const averageDuration = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null
-  const completedSessions = sessions.value.filter((session) => getSessionStatusKey(session) === 'completed').length
+  const completedSessions = dashboardSessions.value.filter((session) => session.statusKey === 'completed' || session.status === 'Voltooid').length
   const completedPercentage = totalSessions ? Math.round((completedSessions / totalSessions) * 100) : 0
 
   return [
@@ -711,6 +706,31 @@ function getWeekStart(date) {
 
 function isCompletedSession(session) {
   return getSessionStatusKey(session) === 'completed'
+}
+
+function normalizeDashboardSession(session, index) {
+  const id = getSessionRawId(session) || `sessie-${index + 1}`
+  const displayDate = getDashboardSessionDate(session)
+  const statusInfo = getSessionStatusInfo(session)
+  const statusKey = getSessionStatusKey(session)
+  const scenarioKey = getSessionScenarioKey(session)
+
+  return {
+    id,
+    shortId: shortenId(id),
+    scenarioKey,
+    scenario: getSessionScenarioName(session),
+    status: statusInfo.label,
+    statusKey,
+    statusClass: statusInfo.className,
+    statusIcon: statusInfo.icon,
+    durationMs: getSessionDurationMs(session),
+    date: formatDate(displayDate),
+    sessionDate: displayDate,
+    weekStamp: displayDate?.getTime?.() || 0,
+    sortStamp: displayDate?.getTime?.() || 0,
+    raw: session,
+  }
 }
 </script>
 
