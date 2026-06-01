@@ -19,6 +19,9 @@
       </div>
     </header>
 
+    <ErrorState v-if="pageError" type="api" />
+
+    <template v-else>
     <section class="kpi-row">
       <div class="kpi-card big">
         <div class="kpi-label">Sessies</div>
@@ -55,7 +58,6 @@
           </select>
         </label>
         <div v-if="loadingScenarios || loadingScenarioData" class="small-label">Data laden...</div>
-        <div v-else-if="errorMessage" class="small-label">{{ errorMessage }}</div>
       </div>
     </div>
 
@@ -181,11 +183,13 @@
     </section>
 
     <!-- 'Afhaak per stap' section removed as requested -->
+    </template>
   </main>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import ErrorState from '@/components/ErrorState.vue'
 import { supabase } from '@/services/supabase'
 import { formatDate as formatDateInBrussels } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
@@ -200,6 +204,7 @@ const activeTab = ref('all')
 const loadingScenarios = ref(true)
 const loadingScenarioData = ref(false)
 const errorMessage = ref('')
+const pageError = computed(() => !loadingScenarios.value && !loadingScenarioData.value && Boolean(errorMessage.value))
 const scenarios = ref([])
 const selectedScenarioKey = ref('all')
 const sessions = ref([])
@@ -388,7 +393,7 @@ async function loadScenarios() {
   } catch (error) {
     scenarios.value = []
     selectedScenarioKey.value = 'all'
-    errorMessage.value = error?.message || 'Scenario\'s konden niet worden geladen.'
+    errorMessage.value = 'De data kon niet geladen worden. Probeer opnieuw.'
   } finally {
     loadingScenarios.value = false
   }
@@ -415,7 +420,7 @@ async function loadScenarioData() {
   } catch (error) {
     sessions.value = []
     events.value = []
-    errorMessage.value = error?.message || 'Inzichten konden niet worden geladen.'
+    errorMessage.value = 'De data kon niet geladen worden. Probeer opnieuw.'
   } finally {
     loadingScenarioData.value = false
   }

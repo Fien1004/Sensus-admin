@@ -20,11 +20,13 @@
 
       <div class="card-body">
         <div v-if="loading" class="state-message">Gegevens laden...</div>
-        <div v-else-if="errorMessage" class="state-message state-error">{{ errorMessage }}</div>
+        <ErrorState v-else-if="loadError" type="api" />
 
         <form v-else class="settings-form" @submit.prevent="onSave">
           <div class="form-left">
             <div class="form-column">
+              <div v-if="errorMessage" class="state-message state-error">{{ errorMessage }}</div>
+
               <label class="label">Profielfoto</label>
 
               <div class="avatar-area">
@@ -84,6 +86,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import ErrorState from '@/components/ErrorState.vue'
 import PenIcon from '@/assets/icons/pen.svg'
 import { supabase } from '@/services/supabase'
 import { useAuthStore } from '@/stores/auth'
@@ -91,6 +94,7 @@ import { useAuthStore } from '@/stores/auth'
 const loading = ref(true)
 const saving = ref(false)
 const uploadingAvatar = ref(false)
+const loadError = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
 const fileInput = ref(null)
@@ -192,6 +196,7 @@ onMounted(() => {
 
 async function loadSettings() {
   loading.value = true
+  loadError.value = ''
   errorMessage.value = ''
   successMessage.value = ''
 
@@ -226,7 +231,7 @@ async function loadSettings() {
     }
   } catch (error) {
     console.error('Loading settings failed:', error)
-    errorMessage.value = error?.message || 'Instellingen konden niet geladen worden.'
+    loadError.value = 'De data kon niet geladen worden. Probeer opnieuw.'
   } finally {
     loading.value = false
   }

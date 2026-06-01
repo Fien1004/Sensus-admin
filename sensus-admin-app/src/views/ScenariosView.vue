@@ -23,7 +23,7 @@
 
     <section class="card overview-card">
       <div v-if="loading" class="table-state">Scenario’s laden...</div>
-      <div v-else-if="errorMessage" class="table-state table-state-error">{{ errorMessage }}</div>
+      <ErrorState v-else-if="errorMessage" type="api" />
       <template v-else>
         <div class="filters-row">
           <label class="search-field">
@@ -198,6 +198,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import ErrorState from '@/components/ErrorState.vue'
 import { supabase } from '@/services/supabase'
 import { formatDate } from '@/utils/dateFormatter'
 
@@ -275,7 +276,7 @@ async function loadScenarios() {
     openActionMenuId.value = null
   } catch (error) {
     scenarioItems.value = []
-    errorMessage.value = error?.message || 'Scenario’s konden niet worden geladen.'
+    errorMessage.value = 'De data kon niet geladen worden. Probeer opnieuw.'
   } finally {
     loading.value = false
   }

@@ -127,7 +127,7 @@
           <tbody v-else-if="errorMessage">
             <tr>
               <td colspan="8">
-                <div class="empty-state table-state-error">{{ errorMessage }}</div>
+                <ErrorState type="api" />
               </td>
             </tr>
           </tbody>
@@ -331,6 +331,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import Drawer from '@/components/Drawer.vue'
+import ErrorState from '@/components/ErrorState.vue'
 import { supabase } from '@/services/supabase'
 import { formatDate as formatDateInBrussels } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
@@ -429,7 +430,7 @@ async function fetchSessions() {
     scenarios.value = []
     reflections.value = []
     analyticsRows.value = []
-    errorMessage.value = error?.message || 'Sessies konden niet worden geladen.'
+    errorMessage.value = 'De data kon niet geladen worden. Probeer opnieuw.'
   } finally {
     loading.value = false
   }

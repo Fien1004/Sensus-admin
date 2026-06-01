@@ -5,13 +5,9 @@
       <p class="state-text">De data uit Supabase wordt opgehaald.</p>
     </section>
 
-    <section v-if="errorMessage" class="card dashboard-state dashboard-state-error" aria-live="assertive">
-      <p class="state-title">Dashboard kan niet volledig geladen worden.</p>
-      <p class="state-text">{{ errorMessage }}</p>
-      <button type="button" class="retry-button" @click="loadDashboard">Opnieuw laden</button>
-    </section>
+    <ErrorState v-else-if="errorMessage" type="api" />
 
-    <section v-if="!loading" class="dashboard-content">
+    <section v-else class="dashboard-content">
       <section class="kpi-grid" aria-label="KPI overzicht">
         <article v-for="card in kpiCards" :key="card.label" class="card kpi-card">
           <p class="card-label">{{ card.label }}</p>
@@ -173,6 +169,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertTriangle, CheckCircle, Clock3, MessageSquare, Trophy } from 'lucide-vue-next'
+import ErrorState from '@/components/ErrorState.vue'
 import { supabase } from '@/services/supabase'
 import { formatDate } from '@/utils/dateFormatter'
 import { formatDuration } from '@/utils/formatDuration'
@@ -252,7 +249,7 @@ async function loadDashboard(options = {}) {
 
     const secondaryError = [eventsResult.error, scenariosResult.error].find(Boolean)
     if (secondaryError) {
-      errorMessage.value = secondaryError.message || 'Niet alle dashboarddata kon worden geladen.'
+      errorMessage.value = 'De data kon niet geladen worden. Probeer opnieuw.'
     }
   } catch (error) {
     console.error('Dashboard data kon niet worden geladen.', error)
@@ -260,7 +257,7 @@ async function loadDashboard(options = {}) {
     scenarios.value = []
     events.value = []
     clearDashboardInsights()
-    errorMessage.value = error?.message || 'Dashboard data kon niet worden geladen.'
+    errorMessage.value = 'De data kon niet geladen worden. Probeer opnieuw.'
   } finally {
     if (!silent) {
       loading.value = false

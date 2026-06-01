@@ -40,6 +40,10 @@ const router = createRouter({
           component: DashboardView,
         },
         {
+          path: 'dashboard',
+          component: DashboardView,
+        },
+        {
           path: 'scenarios',
           component: ScenariosView,
         },

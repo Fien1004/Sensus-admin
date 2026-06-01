@@ -7,11 +7,7 @@
     </section>
 
     <section v-else-if="loadError" class="editor-shell">
-      <section class="editor-panel card">
-        <div class="save-error" role="alert">
-          {{ loadError }}
-        </div>
-      </section>
+      <ErrorState type="api" />
     </section>
 
     <template v-else>
@@ -412,6 +408,7 @@
 import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/services/supabase'
+import ErrorState from '@/components/ErrorState.vue'
 import { useNotificationsStore } from '@/stores/notifications'
 import ChatScenarioPreview from '@/components/ChatScenarioPreview.vue'
 import NarrativeScenarioPreview from '@/components/NarrativeScenarioPreview.vue'
@@ -963,7 +960,7 @@ async function loadScenarioIntoEditor() {
     selectedStepKey.value = 'intro'
   } catch (error) {
     console.error(error)
-    loadError.value = error?.message || 'Scenario kon niet worden geladen.'
+    loadError.value = 'De data kon niet geladen worden. Probeer opnieuw.'
   } finally {
     isLoading.value = false
   }
