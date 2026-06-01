@@ -655,9 +655,10 @@ function getFirstNumber(source, keys) {
 function mapSessionRecord(record, index) {
   const rawId = getFirstString(record, ['id', 'session_id', 'sessionId', 'uuid']) || `sessie-${index + 1}`
 
-  const startDate = getFirstDate(record, ['started_at'])
-  const endDate = getFirstDate(record, ['ended_at'])
-  const displayDate = startDate || getFirstDate(record, ['created_at']) || endDate 
+  const startDate = getFirstDate(record, ['started_at', 'start_time'])
+  const endDate = getFirstDate(record, ['ended_at', 'end_time'])
+  const displayDate = startDate || getFirstDate(record, ['created_at']) || endDate
+  const durationFromDatesMs = calculateDurationMs(startDate, endDate)
 
   const normalizedStatus = normalizeStatus(record)
   const isOffline = getOfflineState(record)
@@ -680,7 +681,8 @@ function mapSessionRecord(record, index) {
     status: normalizedStatus,
     statusKey: statusKeyFromLabel(normalizedStatus),
     isOffline,
-    durationMs: getDurationMs(record, startDate, endDate),
+    durationMs: getDurationMs(record, durationFromDatesMs),
+    hasValidDurationWindow: typeof durationFromDatesMs === 'number' && durationFromDatesMs > 0,
     sessionDate: displayDate,
     sortStamp: displayDate?.getTime?.() || 0,
     reflectionText: getFirstString(record, ['reflection_text', 'reflectionText', 'reflection', 'user_reflection', 'reflection_message', 'message']),
@@ -804,18 +806,18 @@ function calculateDurationMs(startDate, endDate) {
   return diffMs
 }
 
-function getDurationMs(record, startDate, endDate) {
-  const durationMs = getFirstNumber(record, ['duration_seconds'])
+function getDurationMs(record, durationFromDatesMs) {
+  const durationSeconds = getFirstNumber(record, ['duration', 'duration_seconds'])
 
-  if (typeof durationMs === 'number' && durationMs >= 0) {
-    return durationMs
+  if (typeof durationSeconds === 'number' && durationSeconds > 0) {
+    return durationSeconds * 1000
   }
 
-  return calculateDurationMs(startDate, endDate) || 0
+  return durationFromDatesMs
 }
 
 function getDurationMinutes(record, startDate, endDate) {
-  const durationMs = getDurationMs(record, startDate, endDate)
+  const durationMs = getDurationMs(record, calculateDurationMs(startDate, endDate))
 
   if (typeof durationMs === 'number' && durationMs >= 0) {
     return durationMs / 60000
@@ -937,8 +939,9 @@ const kpi = computed(() => {
   const thisWeekCount = all.filter((s) => s.sessionDate && isInCurrentWeek(s.sessionDate)).length
 
   const durationSource = all
+    .filter((s) => s.statusKey === 'completed' && s.hasValidDurationWindow)
     .map((s) => s.durationMs)
-    .filter((value) => typeof value === 'number' && value >= 0)
+    .filter((value) => typeof value === 'number' && value > 0)
 
   const avgDuration = durationSource.length
     ? formatDuration(Math.round(durationSource.reduce((sum, value) => sum + value, 0) / durationSource.length))
