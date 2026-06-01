@@ -5,9 +5,12 @@ export function formatDuration(durationMs) {
   if (seconds < 60) return `${seconds} sec`
 
   const minutes = Math.floor(seconds / 60)
-  const restSeconds = seconds % 60
+  const restSeconds = String(seconds % 60).padStart(2, '0')
 
-  if (restSeconds === 0) return `${minutes} min`
+  if (minutes < 60) return `${minutes}m ${restSeconds}s`
 
-  return `${minutes} min ${restSeconds} sec`
+  const hours = Math.floor(minutes / 60)
+  const restMinutes = String(minutes % 60).padStart(2, '0')
+
+  return `${hours}u ${restMinutes}m`
 }
