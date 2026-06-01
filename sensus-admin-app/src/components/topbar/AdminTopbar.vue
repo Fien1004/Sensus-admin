@@ -1,7 +1,6 @@
 <template>
   <header class="topbar" role="banner">
     <div class="title-wrap">
-      <h1 class="title">Admin Panel</h1>
     </div>
 
     <div class="controls">
