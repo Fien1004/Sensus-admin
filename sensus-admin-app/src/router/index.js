@@ -10,6 +10,7 @@ import ScenarioEditView from '@/views/ScenarioEditView.vue'
 import SessionsView from '@/views/SessionsView.vue'
 import UsersView from '@/views/UsersView.vue'
 import InsightsView from '@/views/InsightsView.vue'
+import AccessCodesView from '@/views/AccessCodesView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import SettingsPasswordView from '@/views/SettingsPasswordView.vue'
 import LoginView from '@/views/LoginView.vue'
@@ -67,6 +68,10 @@ const router = createRouter({
         {
           path: 'analytics',
           component: InsightsView,
+        },
+        {
+          path: 'access-codes',
+          component: AccessCodesView,
         },
         {
           path: 'settings',

@@ -25,6 +25,11 @@
         <span class="label">Inzichten</span>
       </RouterLink>
 
+      <RouterLink to="/access-codes" class="nav-item">
+        <img :src="icons.accessCodes" alt="Toegangscodes" class="icon" />
+        <span class="label">Codes</span>
+      </RouterLink>
+
       <RouterLink to="/settings" class="nav-item">
         <img :src="icons.settings" alt="Instellingen" class="icon" />
         <span class="label">Instellingen</span>
@@ -39,6 +44,7 @@ import dashboardIcon from '@/assets/icons/dashboard.svg'
 import scenariosIcon from '@/assets/icons/apps.svg'
 import sessionsIcon from '@/assets/icons/clock.svg'
 import analyticsIcon from '@/assets/icons/stats.svg'
+import accessCodesIcon from '@/assets/icons/lock.svg'
 import settingsIcon from '@/assets/icons/settings.svg'
 
 const logo = logoSrc
@@ -47,6 +53,7 @@ const icons = {
   scenarios: scenariosIcon,
   sessions: sessionsIcon,
   analytics: analyticsIcon,
+  accessCodes: accessCodesIcon,
   settings: settingsIcon,
 }
 </script>
