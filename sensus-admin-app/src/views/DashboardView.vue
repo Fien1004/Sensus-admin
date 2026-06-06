@@ -560,6 +560,10 @@ function getEventSessionKey(event) {
   return normalizeText(getFirstString(event, ['session_id', 'sessionId', 'session_uuid', 'sessionUuid']))
 }
 
+function getEventTimestamp(event) {
+  return getFirstDate(event, ['created_at', 'timestamp', 'occurred_at', 'answered_at', 'time', 'date'])
+}
+
 function isActiveScenario(record) {
   for (const key of ['active', 'is_active', 'enabled']) {
     if (typeof record?.[key] === 'boolean') {
